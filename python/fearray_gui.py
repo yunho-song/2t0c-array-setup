@@ -42,8 +42,136 @@ from fearray_arduino import FeArrayArduino, ScenarioParams, ReadRecord, NUM_CH  
 from fearray_measure import ExperimentWriter                                       # noqa: E402
 from psu_macro_2T0C import DEFAULT_RAILS, DEFAULT_ON_ORDER                          # noqa: E402
 
+
+# ───────────────────────── UI language / fonts ─────────────────────────
+# Tk shows "\uXXXX" when no installed font has Hangul glyphs (common on conda/WSL Tk).
+# We pick a Korean-capable font if one exists, otherwise fall back to English labels.
+KO_FONTS = ("Malgun Gothic", "맑은 고딕", "NanumGothic", "Noto Sans CJK KR", "Noto Sans KR", "AppleGothic", "UnDotum", "Baekmuk Gulim")
+_UI_KO = True
+_EN = {}
+
+
+def t(s: str) -> str:
+    """translate a Korean UI string to English when Korean fonts are unavailable"""
+    return s if _UI_KO else _EN.get(s, s)
+
+
+def setup_fonts(root) -> bool:
+    global _UI_KO
+    import tkinter.font as tkfont
+    fams = set(tkfont.families(root))
+    chosen = next((f for f in KO_FONTS if f in fams), None)
+    if "--en" in sys.argv:
+        chosen = None
+    if chosen:
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont", "TkTooltipFont"):
+            try:
+                tkfont.nametofont(name).configure(family=chosen, size=9)
+            except Exception:
+                pass
+        try:
+            ttk.Style().configure(".", font=(chosen, 9))
+        except Exception:
+            pass
+        _UI_KO = True
+    else:
+        _UI_KO = False
+    return _UI_KO
+
+_EN.update({
+    '보드 아날로그 전원': 'board analog supply',
+    'WTR gate OFF (N1 LOW, 음수)': 'WTR gate OFF (N1 LOW, negative)',
+    'Program 레벨 (N2 HIGH)': 'Program level (N2 HIGH)',
+    'Erase / read-write 레벨 (N2 LOW)': 'Erase / read-write level (N2 LOW)',
+    'Read 바이어스': 'Read bias',
+    'Set 반복': 'Sets',
+    'P→D 반복 횟수 (PD/DP)': 'P→D repeat count (PD/DP)',
+    'P 펄스 수': 'P pulses',
+    'set당 Program 펄스': 'program pulses per set',
+    'D 펄스 수': 'D pulses',
+    'set당 Erase 펄스': 'erase pulses per set',
+    'P 폭 [µs]': 'P width [µs]',
+    'Program 펄스 폭': 'program pulse width',
+    'D 폭 [µs]': 'D width [µs]',
+    'Erase 펄스 폭': 'erase pulse width',
+    '라인 ON 후 펄스까지': 'line ON → pulse',
+    '펄스 후 대기': 'wait after pulse',
+    '게이트 복귀 대기': 'gate settle',
+    'Read 간격': 'Read every',
+    'N 펄스마다 맵 read (0 = read 없음)': 'map read every N pulses (0 = none)',
+    'RWL 펄스 수 ×100 µs': 'RWL pulses ×100 µs',
+    'N1ALL/N1SEL: WWL ON 후 안정화': 'N1ALL/N1SEL: settle after WWL ON',
+    'Read 전 대기 [ms]': 'Pre-read wait [ms]',
+    'ADC 평균': 'ADC avg',
+    'cap 1회 충전, ADC n회 평균': 'one cap charge, n ADC samples',
+    'P→D 대기 [ms]': 'P→D gap [ms]',
+    '펌웨어 PD에서 phase 사이': 'between phases (firmware PD)',
+    'R: 횟수': 'R: points',
+    'R 시나리오 맵 read 횟수': 'R scenario map reads',
+    'R: 간격 [s]': 'R: interval [s]',
+    'R 시나리오 read 간격': 'R scenario read interval',
+    ' 연결 ': ' Connection ',
+    '시뮬레이션 모드 (하드웨어 없음)': 'Simulation mode (no hardware)',
+    'PSU 제어 사용 (해제 시 전압은 수동)': 'Control PSU (off = set voltages manually)',
+    '연결': 'Connect',
+    '미연결': 'not connected',
+    ' 시나리오 / 타이밍 ': ' Scenario / timing ',
+    '실험 이름': 'Name',
+    '시나리오': 'Scenario',
+    'Read 중 WWL': 'WWL in read',
+    'P 중 WWL 유지': 'hold WWL in P',
+    '저장 폴더': 'Output dir',
+    '▶  측정 시작': '▶  Start',
+    '■  중지': '■  Stop',
+    'YAML 불러오기': 'Load YAML',
+    'YAML 저장': 'Save YAML',
+    ' 셀 선택 (클릭)  row=RWL/WBL, col=WWL/ADC ': ' Cell select (click)  row=RWL/WBL, col=WWL/ADC ',
+    '전체': 'all',
+    '해제': 'none',
+    '선택: 없음': 'selected: none',
+    ' PSU 전압 [V] ': ' PSU voltages [V] ',
+    'P / D phase에 다른 전압 사용': 'Different voltages for P / D phase',
+    '기본': 'base',
+    'P/D 칸이 비면 기본값 사용. 음수 rail은 PSU 채널을 반전 배선(negative) 해야 함.': 'Empty P/D cell = base value. Negative rails need the PSU channel wired inverted (negative: true).',
+    '전압 적용 (기본)': 'Apply (base)',
+    '측정값 읽기': 'Read back',
+    '0 V로': 'All 0 V',
+    '  실시간 데이터  ': '  Live data  ',
+    '  파형 미리보기 (현재 파라미터)  ': '  Waveform preview (current parameters)  ',
+    'VISA 목록 실패: {e}': 'VISA list failed: {e}',
+    '선택: 없음 (INIT / R / DBGR 는 선택 없이 가능)': 'selected: none (INIT / R / DBGR need no selection)',
+    '{rail} 전압이 비어 있음': '{rail} voltage is empty',
+    '먼저 연결하세요 (PSU 제어 사용 체크).': "Connect first (with 'Control PSU' checked).",
+    '적용: ': 'applied: ',
+    'PSU 적용 {v}': 'PSU applied {v}',
+    '측정: ': 'measured: ',
+    'readback 실패: {e}': 'readback failed: {e}',
+    '모든 rail 0 V': 'all rails 0 V',
+    'Arduino 포트를 선택하세요': 'Select the Arduino port',
+    'PSU1/PSU2 VISA 주소를 선택하세요 (↺)': 'Select PSU1/PSU2 VISA addresses (↺)',
+    '연결 실패': 'Connection failed',
+    '연결 해제': 'Disconnect',
+    '연결됨': 'connected',
+    ' (시뮬레이션)': ' (simulation)',
+    'PSU 해제 오류: {e}': 'PSU disconnect error: {e}',
+    '입력 오류': 'Input error',
+    '셀을 선택하세요': 'Select at least one cell',
+    '중지됨': 'stopped',
+    '완료': 'done',
+    '오류: {e}': 'error: {e}',
+    '중지 요청 (펌웨어가 현재 read를 마치면 멈춤)': 'stop requested (firmware stops after the current read)',
+    '저장 오류': 'Save error',
+    'YAML 불러옴: {fn}': 'YAML loaded: {fn}',
+    'rows {rows} × cols {cols} → {n}셀': 'rows {rows} × cols {cols} → {n} cells',
+    '\n주의: 펌웨어는 row×col 교차곱을 선택하므로 {extra} 도 함께 업데이트됨 (+ 표시)': '\nNote: firmware selects the row×col cross product, so {extra} are updated too (+)',
+    '시작: {name} {cmd}': 'start: {name} {cmd}',
+    '저장: {d}': 'saved: {d}',
+    'YAML 저장: {fn}  (fearray_measure.py {b} 로 실행 가능)': 'YAML saved: {fn}  (run with fearray_measure.py {b})',
+    'YAML에 실험 {n}개 — GUI는 첫 번째만 불러옴 (전체 실행은 fearray_measure.py)': 'YAML has {n} experiments — GUI loads only the first (use fearray_measure.py for all)',
+})
+
 RAILS = ["VDD", "WWL_ON", "WWL_OFF", "WBL_PROG", "WBL_OFF", "VREAD"]
-RAIL_HELP = {
+RAIL_HELP = {  # noqa
     "VDD": "보드 아날로그 전원",
     "WWL_ON": "WTR gate ON  (N1 HIGH)",
     "WWL_OFF": "WTR gate OFF (N1 LOW, 음수)",
@@ -77,6 +205,7 @@ PARAM_FIELDS = [  # (key, label, default, tooltip)
 class FeArrayGUI:
     def __init__(self, root: tk.Tk, sim_default: bool = False):
         self.root = root
+        setup_fonts(root)
         root.title("2T0C FeFET Array Measurement")
         root.minsize(1360, 760)
 
@@ -117,9 +246,9 @@ class FeArrayGUI:
         self._build_log(right)
 
     def _build_connection(self, parent):
-        f = ttk.LabelFrame(parent, text=" 연결 ", padding=6)
+        f = ttk.LabelFrame(parent, text=t(" 연결 "), padding=6)
         f.pack(fill="x", pady=(0, 6))
-        ttk.Checkbutton(f, text="시뮬레이션 모드 (하드웨어 없음)", variable=self.sim_var,
+        ttk.Checkbutton(f, text=t("시뮬레이션 모드 (하드웨어 없음)"), variable=self.sim_var,
                         command=self._sim_toggled).grid(row=0, column=0, columnspan=3, sticky="w")
 
         ttk.Label(f, text="Arduino").grid(row=1, column=0, sticky="w")
@@ -139,44 +268,44 @@ class FeArrayGUI:
         ttk.Button(f, text="↺", width=2, command=self._refresh_visa).grid(row=2, column=2)
 
         self.use_psu_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f, text="PSU 제어 사용 (해제 시 전압은 수동)", variable=self.use_psu_var).grid(
+        ttk.Checkbutton(f, text=t("PSU 제어 사용 (해제 시 전압은 수동)"), variable=self.use_psu_var).grid(
             row=4, column=0, columnspan=3, sticky="w")
 
-        self.conn_btn = ttk.Button(f, text="연결", command=self._toggle_connect)
+        self.conn_btn = ttk.Button(f, text=t("연결"), command=self._toggle_connect)
         self.conn_btn.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(4, 0))
-        self.conn_lbl = ttk.Label(f, text="미연결", foreground="gray")
+        self.conn_lbl = ttk.Label(f, text=t("미연결"), foreground="gray")
         self.conn_lbl.grid(row=6, column=0, columnspan=3, sticky="w")
 
     def _build_params(self, parent):
-        f = ttk.LabelFrame(parent, text=" 시나리오 / 타이밍 ", padding=6)
+        f = ttk.LabelFrame(parent, text=t(" 시나리오 / 타이밍 "), padding=6)
         f.pack(fill="x", pady=(0, 6))
-        ttk.Label(f, text="실험 이름").grid(row=0, column=0, sticky="w")
+        ttk.Label(f, text=t("실험 이름")).grid(row=0, column=0, sticky="w")
         self.name_var = tk.StringVar(value="cell_PD")
         ttk.Entry(f, textvariable=self.name_var, width=14).grid(row=0, column=1, sticky="w")
-        ttk.Label(f, text="시나리오").grid(row=0, column=2, sticky="w", padx=(8, 0))
+        ttk.Label(f, text=t("시나리오")).grid(row=0, column=2, sticky="w", padx=(8, 0))
         self.scen_var = tk.StringVar(value="PD")
         ttk.Combobox(f, textvariable=self.scen_var, values=SCENARIOS, width=6, state="readonly").grid(row=0, column=3)
 
         self.pvars: Dict[str, tk.StringVar] = {}
         for i, (key, label, default, tip) in enumerate(PARAM_FIELDS):
             r, c = 1 + i // 2, (i % 2) * 2
-            ttk.Label(f, text=label).grid(row=r, column=c, sticky="w", padx=(0 if c == 0 else 8, 0))
+            ttk.Label(f, text=t(label)).grid(row=r, column=c, sticky="w", padx=(0 if c == 0 else 8, 0))
             v = tk.StringVar(value=str(default))
             self.pvars[key] = v
             e = ttk.Entry(f, textvariable=v, width=8)
             e.grid(row=r, column=c + 1, sticky="w", pady=1)
             if tip:
-                e.bind("<Enter>", lambda _e, t=tip: self._status(t))
+                e.bind("<Enter>", lambda _e, tip_=tip: self._status(t(tip_)))
 
         r = 1 + (len(PARAM_FIELDS) + 1) // 2
-        ttk.Label(f, text="Read 중 WWL").grid(row=r, column=0, sticky="w")
+        ttk.Label(f, text=t("Read 중 WWL")).grid(row=r, column=0, sticky="w")
         self.rmode_var = tk.StringVar(value="N1OFF")
         ttk.Combobox(f, textvariable=self.rmode_var, values=["N1OFF", "N1ALL", "N1SEL"], width=7,
                      state="readonly").grid(row=r, column=1, sticky="w")
         self.hold_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="P 중 WWL 유지", variable=self.hold_var).grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
+        ttk.Checkbutton(f, text=t("P 중 WWL 유지"), variable=self.hold_var).grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
 
-        ttk.Label(f, text="저장 폴더").grid(row=r + 1, column=0, sticky="w")
+        ttk.Label(f, text=t("저장 폴더")).grid(row=r + 1, column=0, sticky="w")
         self.out_var = tk.StringVar(value=os.path.join(HERE, "data"))
         ttk.Entry(f, textvariable=self.out_var, width=22).grid(row=r + 1, column=1, columnspan=2, sticky="w")
         ttk.Button(f, text="…", width=2, command=self._pick_dir).grid(row=r + 1, column=3, sticky="w")
@@ -184,19 +313,19 @@ class FeArrayGUI:
     def _build_buttons(self, parent):
         f = ttk.Frame(parent)
         f.pack(fill="x")
-        self.start_btn = ttk.Button(f, text="▶  측정 시작", command=self._start, state="disabled")
+        self.start_btn = ttk.Button(f, text=t("▶  측정 시작"), command=self._start, state="disabled")
         self.start_btn.pack(fill="x", pady=2)
-        self.stop_btn = ttk.Button(f, text="■  중지", command=self._stop, state="disabled")
+        self.stop_btn = ttk.Button(f, text=t("■  중지"), command=self._stop, state="disabled")
         self.stop_btn.pack(fill="x", pady=2)
         g = ttk.Frame(f)
         g.pack(fill="x", pady=2)
-        ttk.Button(g, text="YAML 불러오기", command=self._load_yaml).pack(side="left", expand=True, fill="x")
-        ttk.Button(g, text="YAML 저장", command=self._save_yaml).pack(side="left", expand=True, fill="x")
+        ttk.Button(g, text=t("YAML 불러오기"), command=self._load_yaml).pack(side="left", expand=True, fill="x")
+        ttk.Button(g, text=t("YAML 저장"), command=self._save_yaml).pack(side="left", expand=True, fill="x")
         self.status_lbl = ttk.Label(parent, text="", foreground="gray", wraplength=300)
         self.status_lbl.pack(fill="x", pady=(4, 0))
 
     def _build_cells(self, parent):
-        f = ttk.LabelFrame(parent, text=" 셀 선택 (클릭)  row=RWL/WBL, col=WWL/ADC ", padding=6)
+        f = ttk.LabelFrame(parent, text=t(" 셀 선택 (클릭)  row=RWL/WBL, col=WWL/ADC "), padding=6)
         f.pack(fill="x", pady=(0, 6))
         self.cell_btns = {}
         self.cell_state = {}
@@ -213,23 +342,23 @@ class FeArrayGUI:
                 self.cell_state[(r, c)] = False
         g = ttk.Frame(f)
         g.grid(row=6, column=0, columnspan=6, sticky="ew", pady=(4, 0))
-        ttk.Button(g, text="전체", width=5, command=lambda: self._set_cells(all_=True)).pack(side="left")
-        ttk.Button(g, text="해제", width=6, command=lambda: self._set_cells(all_=False)).pack(side="left", padx=2)
+        ttk.Button(g, text=t("전체"), width=5, command=lambda: self._set_cells(all_=True)).pack(side="left")
+        ttk.Button(g, text=t("해제"), width=6, command=lambda: self._set_cells(all_=False)).pack(side="left", padx=2)
         ttk.Button(g, text="(0,0)", width=6, command=lambda: self._set_cells(cells={(0, 0)})).pack(side="left", padx=2)
         ttk.Button(g, text="row 0", width=6, command=lambda: self._set_cells(cells={(0, c) for c in range(5)})).pack(side="left", padx=2)
         ttk.Button(g, text="col 0", width=6, command=lambda: self._set_cells(cells={(r, 0) for r in range(5)})).pack(side="left", padx=2)
-        self.sel_lbl = ttk.Label(f, text="선택: 없음", wraplength=330, foreground="#0F6E8C")
+        self.sel_lbl = ttk.Label(f, text=t("선택: 없음"), wraplength=330, foreground="#0F6E8C")
         self.sel_lbl.grid(row=7, column=0, columnspan=6, sticky="w", pady=(4, 0))
         self._update_sel_label()
 
     def _build_voltages(self, parent):
-        f = ttk.LabelFrame(parent, text=" PSU 전압 [V] ", padding=6)
+        f = ttk.LabelFrame(parent, text=t(" PSU 전압 [V] "), padding=6)
         f.pack(fill="x")
         self.split_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="P / D phase에 다른 전압 사용", variable=self.split_var,
+        ttk.Checkbutton(f, text=t("P / D phase에 다른 전압 사용"), variable=self.split_var,
                         command=self._split_toggled).grid(row=0, column=0, columnspan=4, sticky="w")
         ttk.Label(f, text="rail").grid(row=1, column=0, sticky="w")
-        ttk.Label(f, text="기본").grid(row=1, column=1)
+        ttk.Label(f, text=t("기본")).grid(row=1, column=1)
         self.vP_hdr = ttk.Label(f, text="P phase"); self.vP_hdr.grid(row=1, column=2)
         self.vD_hdr = ttk.Label(f, text="D phase"); self.vD_hdr.grid(row=1, column=3)
         self.vvars: Dict[str, Dict[str, tk.StringVar]] = {"base": {}, "P": {}, "D": {}}
@@ -241,16 +370,16 @@ class FeArrayGUI:
                 self.vvars[ph][rail] = v
                 e = ttk.Entry(f, textvariable=v, width=7)
                 e.grid(row=2 + i, column=1 + j, padx=2, pady=1)
-                e.bind("<Enter>", lambda _e, t=RAIL_HELP[rail]: self._status(t))
+                e.bind("<Enter>", lambda _e, h=RAIL_HELP[rail]: self._status(t(h)))
                 if ph != "base":
                     self.v_entries[ph].append(e)
-        ttk.Label(f, text="P/D 칸이 비면 기본값 사용. 음수 rail은 PSU 채널을 반전 배선(negative) 해야 함.",
+        ttk.Label(f, text=t("P/D 칸이 비면 기본값 사용. 음수 rail은 PSU 채널을 반전 배선(negative) 해야 함."),
                   foreground="gray", wraplength=330).grid(row=8, column=0, columnspan=4, sticky="w", pady=(4, 0))
         g = ttk.Frame(f)
         g.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(4, 0))
-        ttk.Button(g, text="전압 적용 (기본)", command=lambda: self._apply_v("base")).pack(side="left", expand=True, fill="x")
-        ttk.Button(g, text="측정값 읽기", command=self._readback).pack(side="left", expand=True, fill="x", padx=2)
-        ttk.Button(g, text="0 V로", command=self._zero_v).pack(side="left", expand=True, fill="x")
+        ttk.Button(g, text=t("전압 적용 (기본)"), command=lambda: self._apply_v("base")).pack(side="left", expand=True, fill="x")
+        ttk.Button(g, text=t("측정값 읽기"), command=self._readback).pack(side="left", expand=True, fill="x", padx=2)
+        ttk.Button(g, text=t("0 V로"), command=self._zero_v).pack(side="left", expand=True, fill="x")
         self.rail_lbl = ttk.Label(f, text="", foreground="gray", wraplength=330, justify="left")
         self.rail_lbl.grid(row=10, column=0, columnspan=4, sticky="w")
         self._split_toggled()
@@ -270,8 +399,8 @@ class FeArrayGUI:
         self.nb = ttk.Notebook(parent)
         self.nb.grid(row=0, column=0, sticky="nsew")
         tab1 = ttk.Frame(self.nb); tab2 = ttk.Frame(self.nb)
-        self.nb.add(tab1, text="  실시간 데이터  ")
-        self.nb.add(tab2, text="  파형 미리보기 (현재 파라미터)  ")
+        self.nb.add(tab1, text=t("  실시간 데이터  "))
+        self.nb.add(tab2, text=t("  파형 미리보기 (현재 파라미터)  "))
 
         # ── live data ──
         self.fig = Figure(figsize=(7.5, 5.0))
@@ -422,7 +551,7 @@ class FeArrayGUI:
             res = list(pyvisa.ResourceManager().list_resources())
         except Exception as e:
             res = []
-            self._logln(f"VISA 목록 실패: {e}")
+            self._logln(t("VISA 목록 실패: {e}").format(e=e))
         for pid in (1, 2):
             getattr(self, f"psu_cb{pid}")["values"] = res
         if len(res) >= 2 and not self.psu_vars[1].get():
@@ -465,12 +594,12 @@ class FeArrayGUI:
                 b.config(bg="#e8e8e8", text="")
         self.sel_cells = actual
         if not clicked:
-            self.sel_lbl.config(text="선택: 없음 (INIT / R / DBGR 는 선택 없이 가능)")
+            self.sel_lbl.config(text=t("선택: 없음 (INIT / R / DBGR 는 선택 없이 가능)"))
         else:
             extra = actual - clicked
-            msg = f"rows {rows} × cols {cols} → {len(actual)}셀"
+            msg = t("rows {rows} × cols {cols} → {n}셀").format(rows=rows, cols=cols, n=len(actual))
             if extra:
-                msg += f"\n주의: 펌웨어는 row×col 교차곱을 선택하므로 {sorted(extra)} 도 함께 업데이트됨 (+ 표시)"
+                msg += t("\n주의: 펌웨어는 row×col 교차곱을 선택하므로 {extra} 도 함께 업데이트됨 (+ 표시)").format(extra=sorted(extra))
             self.sel_lbl.config(text=msg)
 
     # ── voltages ──
@@ -480,7 +609,7 @@ class FeArrayGUI:
             s = self.vvars[phase][rail].get().strip()
             if s == "":
                 if phase == "base":
-                    raise ValueError(f"{rail} 전압이 비어 있음")
+                    raise ValueError(t("{rail} 전압이 비어 있음").format(rail=rail))
                 continue
             out[rail] = float(s)
         return out
@@ -490,12 +619,12 @@ class FeArrayGUI:
 
     def _apply_v(self, phase):
         if self.psu is None:
-            messagebox.showinfo("PSU", "먼저 연결하세요 (PSU 제어 사용 체크)."); return
+            messagebox.showinfo("PSU", t("먼저 연결하세요 (PSU 제어 사용 체크).")); return
         try:
             v = dict(self._volts("base"), **(self._volts(phase) if phase != "base" else {}))
             self.psu.apply(v)
-            self.rail_lbl.config(text="적용: " + ", ".join(f"{k}={v[k]:g}" for k in v))
-            self._logln(f"PSU 적용 {v}")
+            self.rail_lbl.config(text=t("적용: ") + ", ".join(f"{k}={v[k]:g}" for k in v))
+            self._logln(t("PSU 적용 {v}").format(v=v))
         except Exception as e:
             messagebox.showerror("PSU", str(e))
 
@@ -504,14 +633,14 @@ class FeArrayGUI:
             return
         try:
             rb = self.psu.readback()
-            self.rail_lbl.config(text="측정: " + ", ".join(f"{k}={v:.3f}V/{i*1e3:.1f}mA" for k, (v, i) in rb.items()))
+            self.rail_lbl.config(text=t("측정: ") + ", ".join(f"{k}={v:.3f}V/{i*1e3:.1f}mA" for k, (v, i) in rb.items()))
         except Exception as e:
-            self._logln(f"readback 실패: {e}")
+            self._logln(t("readback 실패: {e}").format(e=e))
 
     def _zero_v(self):
         if self.psu is not None:
             self.psu.ramp_all_down()
-            self.rail_lbl.config(text="모든 rail 0 V")
+            self.rail_lbl.config(text=t("모든 rail 0 V"))
 
     # ── connection ──
     def _toggle_connect(self):
@@ -530,7 +659,7 @@ class FeArrayGUI:
             else:
                 port = self.port_var.get()
                 if not port:
-                    raise RuntimeError("Arduino 포트를 선택하세요")
+                    raise RuntimeError(t("Arduino 포트를 선택하세요"))
                 self.ard = FeArrayArduino(port)
                 self.ard.connect()
             if self.use_psu_var.get():
@@ -540,16 +669,16 @@ class FeArrayGUI:
                     import pyvisa
                     rm = pyvisa.ResourceManager()
                     if not (self.psu_vars[1].get() and self.psu_vars[2].get()):
-                        raise RuntimeError("PSU1/PSU2 VISA 주소를 선택하세요 (↺)")
+                        raise RuntimeError(t("PSU1/PSU2 VISA 주소를 선택하세요 (↺)"))
                 self.psu = PowerSupplyMacro2T0C(rm, self._psu_cfg(), dummy=sim)
                 self.psu.connect()
         except Exception as e:
             self.ard = None; self.psu = None
-            messagebox.showerror("연결 실패", str(e)); return
-        self.conn_btn.config(text="연결 해제")
+            messagebox.showerror(t("연결 실패"), str(e)); return
+        self.conn_btn.config(text=t("연결 해제"))
         self.conn_lbl.config(text=("SIM" if sim else self.port_var.get()) + (" + PSU" if self.psu else ""), foreground="green")
         self.start_btn.config(state="normal")
-        self._logln("연결됨" + (" (시뮬레이션)" if sim else ""))
+        self._logln(t("연결됨") + (t(" (시뮬레이션)") if sim else ""))
 
     def _disconnect(self):
         self._stop()
@@ -557,14 +686,14 @@ class FeArrayGUI:
             try:
                 self.psu.disconnect(ramp_down=True)
             except Exception as e:
-                self._logln(f"PSU 해제 오류: {e}")
+                self._logln(t("PSU 해제 오류: {e}").format(e=e))
             self.psu = None
         if self.ard is not None:
             self.ard.close(); self.ard = None
-        self.conn_btn.config(text="연결")
-        self.conn_lbl.config(text="미연결", foreground="gray")
+        self.conn_btn.config(text=t("연결"))
+        self.conn_lbl.config(text=t("미연결"), foreground="gray")
         self.start_btn.config(state="disabled")
-        self._logln("연결 해제")
+        self._logln(t("연결 해제"))
 
     # ── params ──
     def _params(self) -> ScenarioParams:
@@ -587,9 +716,9 @@ class FeArrayGUI:
             vP = dict(vbase, **self._volts("P")) if split else vbase
             vD = dict(vbase, **self._volts("D")) if split else vbase
         except Exception as e:
-            messagebox.showerror("입력 오류", str(e)); return
+            messagebox.showerror(t("입력 오류"), str(e)); return
         if p.scenario in ("P", "D", "PD", "DP", "DBGP", "DBGD") and not p.rows:
-            messagebox.showerror("입력 오류", "셀을 선택하세요"); return
+            messagebox.showerror(t("입력 오류"), t("셀을 선택하세요")); return
 
         name = self.name_var.get().strip() or "exp"
         self.writer = ExperimentWriter(self.out_var.get(), name, p, self.psu.rails if self.psu else {},
@@ -604,7 +733,7 @@ class FeArrayGUI:
 
         self.stop_evt.clear()
         self.start_btn.config(state="disabled"); self.stop_btn.config(state="normal")
-        self._logln(f"시작: {name} {p.to_command()}")
+        self._logln(t("시작: {name} {cmd}").format(name=name, cmd=p.to_command()))
         self.worker = threading.Thread(target=self._run_worker, args=(p, vbase, vP, vD, split), daemon=True)
         self.worker.start()
 
@@ -635,9 +764,9 @@ class FeArrayGUI:
                 rails(vbase)
                 for rec in self.ard.run(p):
                     self.q.put(("rec", rec))
-            self.q.put(("done", "중지됨" if self.stop_evt.is_set() else "완료"))
+            self.q.put(("done", t("중지됨") if self.stop_evt.is_set() else t("완료")))
         except Exception as e:
-            self.q.put(("done", f"오류: {e}"))
+            self.q.put(("done", t("오류: {e}").format(e=e)))
 
     def _stop(self):
         if self.worker and self.worker.is_alive():
@@ -646,7 +775,7 @@ class FeArrayGUI:
                 self.ard.abort()
             except Exception:
                 pass
-            self._logln("중지 요청 (펌웨어가 현재 read를 마치면 멈춤)")
+            self._logln(t("중지 요청 (펌웨어가 현재 read를 마치면 멈춤)"))
 
     # ── UI poll ──
     def _poll(self):
@@ -670,7 +799,7 @@ class FeArrayGUI:
                 self._logln(payload)
                 if self.writer:
                     self.writer.close()
-                    self._logln(f"저장: {self.writer.dir}")
+                    self._logln(t("저장: {d}").format(d=self.writer.dir))
                     self.writer = None
                 self.start_btn.config(state="normal"); self.stop_btn.config(state="disabled")
         if redraw:
@@ -727,13 +856,13 @@ class FeArrayGUI:
         try:
             cfg = self._to_yaml_dict()
         except Exception as e:
-            messagebox.showerror("저장 오류", str(e)); return
+            messagebox.showerror(t("저장 오류"), str(e)); return
         fn = filedialog.asksaveasfilename(defaultextension=".yaml", initialdir=HERE,
                                           initialfile=f"{self.name_var.get()}.yaml")
         if fn:
             with open(fn, "w", encoding="utf-8") as f:
                 yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
-            self._logln(f"YAML 저장: {fn}  (fearray_measure.py {os.path.basename(fn)} 로 실행 가능)")
+            self._logln(t("YAML 저장: {fn}  (fearray_measure.py {b} 로 실행 가능)").format(fn=fn, b=os.path.basename(fn)))
 
     def _load_yaml(self):
         fn = filedialog.askopenfilename(filetypes=[("YAML", "*.yaml *.yml")], initialdir=HERE)
@@ -766,7 +895,7 @@ class FeArrayGUI:
                     self.vvars[ph][rail].set(str((pv or {}).get(ph, {}).get(rail, "")) if pv else "")
             self._split_toggled()
             if len(exps) > 1:
-                self._logln(f"YAML에 실험 {len(exps)}개 — GUI는 첫 번째만 불러옴 (전체 실행은 fearray_measure.py)")
+                self._logln(t("YAML에 실험 {n}개 — GUI는 첫 번째만 불러옴 (전체 실행은 fearray_measure.py)").format(n=len(exps)))
         for k, v in d.items():
             if k in self.pvars:
                 self.pvars[k].set(str(v))
@@ -774,7 +903,7 @@ class FeArrayGUI:
             self.rmode_var.set(str(d["read_mode"]).upper())
         if "wwl_hold" in d:
             self.hold_var.set(bool(d["wwl_hold"]))
-        self._logln(f"YAML 불러옴: {fn}")
+        self._logln(t("YAML 불러옴: {fn}").format(fn=fn))
 
 
 def main():
