@@ -53,6 +53,11 @@ _UI_KO = True
 _EN = {}
 
 
+def SYM(sym: str, ascii_: str) -> str:
+    """unicode symbol when the Tk font can draw it, ASCII otherwise"""
+    return sym if _UI_KO else ascii_
+
+
 def t(s: str) -> str:
     """translate a Korean UI string to English when Korean fonts are unavailable"""
     return s if _UI_KO else _EN.get(s, s)
@@ -63,7 +68,9 @@ def _font_renders_hangul(root, family: str) -> bool:
     import tkinter.font as tkfont
     try:
         f = tkfont.Font(root=root, family=family, size=10)
-        return f.measure("한글") < 3.5 * f.measure("ab") and f.measure("한") > 0
+        ok_ko = f.measure("한글") < 3.5 * f.measure("ab") and f.measure("한") > 0
+        ok_sym = f.measure("▶") < 2.5 * f.measure("W")      # "\\u25b6" escape would be ~6 chars wide
+        return ok_ko and ok_sym
     except Exception:
         return False
 
@@ -114,7 +121,9 @@ def setup_fonts(root) -> bool:
         print(f"[fearray_gui] Korean UI font: {chosen}")
     else:
         _UI_KO = False
-        print("[fearray_gui] no font renders Hangul -> English labels (install fonts-nanum, or run with --font NAME; --fonts lists candidates)")
+        print("[fearray_gui] no font renders Hangul -> English/ASCII labels.")
+        print("              On conda/Linux this usually means Tk was built without Xft (TrueType) support:")
+        print("              fix with  conda install -c conda-forge tk   (then fonts-nanum / Noto CJK work), or use the system python3 + python3-tk.")
     return _UI_KO
 
 
@@ -125,7 +134,7 @@ _EN.update({
     'Erase / read-write 레벨 (N2 LOW)': 'Erase / read-write level (N2 LOW)',
     'Read 바이어스': 'Read bias',
     'Set 반복': 'Sets',
-    'P→D 반복 횟수 (PD/DP)': 'P→D repeat count (PD/DP)',
+    'P→D 반복 횟수 (PD/DP)': 'P->D repeat count (PD/DP)',
     'P 펄스 수': 'P pulses',
     'set당 Program 펄스': 'program pulses per set',
     'D 펄스 수': 'D pulses',
@@ -134,7 +143,7 @@ _EN.update({
     'Program 펄스 폭': 'program pulse width',
     'D 폭 [µs]': 'D width [µs]',
     'Erase 펄스 폭': 'erase pulse width',
-    '라인 ON 후 펄스까지': 'line ON → pulse',
+    '라인 ON 후 펄스까지': 'line ON -> pulse',
     '펄스 후 대기': 'wait after pulse',
     '게이트 복귀 대기': 'gate settle',
     'Read 간격': 'Read every',
@@ -144,7 +153,7 @@ _EN.update({
     'Read 전 대기 [ms]': 'Pre-read wait [ms]',
     'ADC 평균': 'ADC avg',
     'cap 1회 충전, ADC n회 평균': 'one cap charge, n ADC samples',
-    'P→D 대기 [ms]': 'P→D gap [ms]',
+    'P→D 대기 [ms]': 'P->D gap [ms]',
     '펌웨어 PD에서 phase 사이': 'between phases (firmware PD)',
     'R: 횟수': 'R: points',
     'R 시나리오 맵 read 횟수': 'R scenario map reads',
@@ -161,8 +170,8 @@ _EN.update({
     'Read 중 WWL': 'WWL in read',
     'P 중 WWL 유지': 'hold WWL in P',
     '저장 폴더': 'Output dir',
-    '▶  측정 시작': '▶  Start',
-    '■  중지': '■  Stop',
+    '▶  측정 시작': '>  Start',
+    '■  중지': '[]  Stop',
     'YAML 불러오기': 'Load YAML',
     'YAML 저장': 'Save YAML',
     ' 셀 선택 (클릭)  row=RWL/WBL, col=WWL/ADC ': ' Cell select (click)  row=RWL/WBL, col=WWL/ADC ',
@@ -188,7 +197,7 @@ _EN.update({
     'readback 실패: {e}': 'readback failed: {e}',
     '모든 rail 0 V': 'all rails 0 V',
     'Arduino 포트를 선택하세요': 'Select the Arduino port',
-    'PSU1/PSU2 VISA 주소를 선택하세요 (↺)': 'Select PSU1/PSU2 VISA addresses (↺)',
+    'PSU1/PSU2 VISA 주소를 선택하세요 (↺)': 'Select PSU1/PSU2 VISA addresses (refresh button)',
     '연결 실패': 'Connection failed',
     '연결 해제': 'Disconnect',
     '연결됨': 'connected',
@@ -202,8 +211,8 @@ _EN.update({
     '중지 요청 (펌웨어가 현재 read를 마치면 멈춤)': 'stop requested (firmware stops after the current read)',
     '저장 오류': 'Save error',
     'YAML 불러옴: {fn}': 'YAML loaded: {fn}',
-    'rows {rows} × cols {cols} → {n}셀': 'rows {rows} × cols {cols} → {n} cells',
-    '\n주의: 펌웨어는 row×col 교차곱을 선택하므로 {extra} 도 함께 업데이트됨 (+ 표시)': '\nNote: firmware selects the row×col cross product, so {extra} are updated too (+)',
+    'rows {rows} × cols {cols} → {n}셀': 'rows {rows} x cols {cols} -> {n} cells',
+    '\n주의: 펌웨어는 row×col 교차곱을 선택하므로 {extra} 도 함께 업데이트됨 (+ 표시)': '\nNote: firmware selects the row x col cross product, so {extra} are updated too (+)',
     '시작: {name} {cmd}': 'start: {name} {cmd}',
     '저장: {d}': 'saved: {d}',
     'YAML 저장: {fn}  (fearray_measure.py {b} 로 실행 가능)': 'YAML saved: {fn}  (run with fearray_measure.py {b})',
@@ -295,7 +304,7 @@ class FeArrayGUI:
         self.port_var = tk.StringVar()
         self.port_cb = ttk.Combobox(f, textvariable=self.port_var, width=22)
         self.port_cb.grid(row=1, column=1, sticky="w", padx=3)
-        ttk.Button(f, text="↺", width=2, command=self._refresh_ports).grid(row=1, column=2)
+        ttk.Button(f, text=SYM("↺", "R"), width=2, command=self._refresh_ports).grid(row=1, column=2)
 
         self.psu_vars = {}
         for i, pid in enumerate((1, 2)):
@@ -305,7 +314,7 @@ class FeArrayGUI:
             cb = ttk.Combobox(f, textvariable=v, width=22)
             cb.grid(row=2 + i, column=1, sticky="w", padx=3)
             setattr(self, f"psu_cb{pid}", cb)
-        ttk.Button(f, text="↺", width=2, command=self._refresh_visa).grid(row=2, column=2)
+        ttk.Button(f, text=SYM("↺", "R"), width=2, command=self._refresh_visa).grid(row=2, column=2)
 
         self.use_psu_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text=t("PSU 제어 사용 (해제 시 전압은 수동)"), variable=self.use_psu_var).grid(
@@ -348,7 +357,7 @@ class FeArrayGUI:
         ttk.Label(f, text=t("저장 폴더")).grid(row=r + 1, column=0, sticky="w")
         self.out_var = tk.StringVar(value=os.path.join(HERE, "data"))
         ttk.Entry(f, textvariable=self.out_var, width=22).grid(row=r + 1, column=1, columnspan=2, sticky="w")
-        ttk.Button(f, text="…", width=2, command=self._pick_dir).grid(row=r + 1, column=3, sticky="w")
+        ttk.Button(f, text=SYM("…", "..."), width=2, command=self._pick_dir).grid(row=r + 1, column=3, sticky="w")
 
     def _build_buttons(self, parent):
         f = ttk.Frame(parent)
@@ -635,7 +644,7 @@ class FeArrayGUI:
         clicked, rows, cols, actual = self._selection()
         for k, b in self.cell_btns.items():
             if k in clicked:
-                b.config(bg="#E8912D", text="●")
+                b.config(bg="#E8912D", text=SYM("●", "O"))
             elif k in actual:
                 b.config(bg="#f7d8b0", text="+")   # cross-product extra
             else:
