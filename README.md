@@ -24,7 +24,8 @@ Arduino Due (FeArray_2T0C_Rev2.ino) ──serial─┘
 | 경로 | 내용 |
 |---|---|
 | `firmware/FeArray_2T0C_Rev2/FeArray_2T0C_Rev2.ino` | 어레이 펌웨어 (Due). 4T0C 비트마스크 구조 + 2T0C_Ferro Rev1.0 핀맵/FE·FEE 펄스 |
-| `python/fearray_measure.py` | 메인 실행 스크립트 (YAML → PSU 설정 → 시나리오 실행 → 저장/플롯) |
+| `python/fearray_gui.py` | **GUI** (연결·전압·셀 선택·타이밍 입력, 실시간 그래프, 중지, YAML 저장/불러오기) |
+| `python/fearray_measure.py` | 배치 실행 스크립트 (YAML → PSU 설정 → 실험 목록 순차 실행 → 저장/플롯) |
 | `python/fearray_arduino.py` | 시리얼 프로토콜, `ScenarioParams`, 전류 역산 |
 | `python/psu_macro_2T0C.py` | 6 rail(WWL_ON/OFF, WBL_PROG/OFF, VREAD, VDD) ↔ PSU/채널 매핑, on/off 순서, 램프다운 |
 | `python/power_supply_EDU36311A.py` | EDU36311A pyvisa 드라이버 (+ `DummyPowerSupply`) |
@@ -37,7 +38,8 @@ Arduino Due (FeArray_2T0C_Rev2.ino) ──serial─┘
 pip install pyserial pyvisa pyvisa-py pyyaml numpy matplotlib
 python -c "import pyvisa; print(pyvisa.ResourceManager().list_resources())"   # PSU VISA 주소 확인 → yaml에 기입
 
-python fearray_measure.py config.yaml --sim          # 하드웨어 없이 전체 흐름 확인
+python fearray_gui.py                                # GUI (--sim 으로 시뮬레이션 체크 상태로 시작)
+python fearray_measure.py config.yaml --sim          # 하드웨어 없이 전체 흐름 확인 (배치)
 python fearray_measure.py config.yaml --no-psu       # PSU는 수동, Arduino만
 python fearray_measure.py config.yaml                # 실측
 python fearray_measure.py config.yaml --only cell00_PD
@@ -62,6 +64,7 @@ row_mask × col_mask의 **교차곱**이 선택됨 (row [0,1] × col [0,1] = 4�
 SCEN,row_mask,col_mask,set_num,pot_num,dep_num,pot_pw,dep_pw,pre,post,zero,read_time,read_set_time,read_delay,read_interval,read_mode,avg,wwl_hold,read_wait_ms,r_interval_s,r_points,0|
 ```
 시나리오: `P` `D` `PD` `DP` `R`(맵 반복 read) `INIT`(맵 1회) `DBGP` `DBGD` `DBGR`
+실행 중 호스트가 `!` 1바이트를 보내면 현재 read/펄스 루프를 빠져나와 `ABORT>` `EOD>`로 끝남 (GUI 중지 버튼)
 
 응답 (read 포인트당 5줄):
 ```
@@ -138,3 +141,11 @@ CH1은 6 V 제한이므로 큰 전압은 CH2/CH3에 배정. 보드용 PSU 3호�
 2. Rev1.0의 `R` 모드는 pulse_width를 초 단위로 썼음 → Rev2에서는 `R` 시나리오가 `r_interval_s`/`r_points`를 사용.
 3. 처음에는 `INIT` → `DBGR`로 맵이 정상인지 본 뒤 `P` 몇 펄스로 시작 권장.
 4. PSU rail 전압은 **실험마다 바꿀 수 있고**(`voltages:` 오버라이드) `sweep:`으로 ISPP처럼 스윕 가능.
+
+## GUI (`fearray_gui.py`)
+
+왼쪽에서 연결(시뮬레이션 체크, Arduino 포트, PSU1/2 VISA 주소)과 시나리오·타이밍을 입력하고,
+가운데 5×5 격자에서 셀을 클릭해 선택(펌웨어는 row×col 교차곱을 선택하므로 추가되는 셀은 `+`로 표시),
+PSU 전압은 기본 / P phase / D phase 열로 입력(P/D 열이 비면 기본값). `▶ 측정 시작`으로 실행하면
+오른쪽에 선택 셀(색)과 비선택 셀(회색) 추이, 현재 25셀 맵이 실시간으로 그려지고, 저장 형식은 배치 실행과 동일.
+`YAML 저장`으로 현재 입력을 `fearray_measure.py`용 설정으로 내보낼 수 있고, 반대로 불러올 수도 있다(첫 실험만).

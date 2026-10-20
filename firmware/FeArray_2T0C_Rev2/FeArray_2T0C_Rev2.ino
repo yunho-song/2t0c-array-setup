@@ -56,6 +56,7 @@
  *          phase : I (initial) | P | D | R
  *          pulse : cumulative pulse count within the phase (0 for initial / R)
  *          row   : 0..4 ;  ADCc = cell (row, c) value, 0..1023 (raw12bit/4)
+ *      ABORT> scenario aborted by host (send a single '!' byte at any time)
  *      EOD>   end of scenario
  *      ERR,...>  parse / argument error
  */
@@ -111,6 +112,13 @@ struct Params {
 };
 Params g;
 int adc_row[5];
+bool g_abort = false;
+
+// host can abort a running scenario by sending '!'
+bool checkAbort() {
+  while (Serial.available()) { if (Serial.read() == '!') g_abort = true; }
+  return g_abort;
+}
 
 // ───────────────────────────── HELPERS ────────────────────────────────
 // delayMicroseconds()는 큰 값에서 정확도가 떨어지므로 ms 단위는 delay()로 분리
@@ -213,7 +221,7 @@ void readMap(int set, char phase, int pulse) {
     udelay(g.read_set_time);
   }
 
-  for (int r = 0; r < 5; r++) {
+  for (int r = 0; r < 5 && !checkAbort(); r++) {
     readRow(r, adc_row);
     Serial.print(set);   Serial.print(',');
     Serial.print(phase); Serial.print(',');
@@ -238,7 +246,7 @@ void runProgramPhase(int set) {
     PIOC->PIO_SODR = n1;
     udelay(g.read_set_time);
   }
-  for (int k = 0; k < g.pot_num; k++) {
+  for (int k = 0; k < g.pot_num && !checkAbort(); k++) {
     programPulse(n1, n2);
     if (g.read_interval > 0 && ((k + 1) % g.read_interval == 0))
       readMap(set, 'P', k + 1);
@@ -248,7 +256,7 @@ void runProgramPhase(int set) {
 
 void runErasePhase(int set) {
   uint32_t n1 = maskToPins(g.col_mask, N1_PIN);
-  for (int k = 0; k < g.dep_num; k++) {
+  for (int k = 0; k < g.dep_num && !checkAbort(); k++) {
     erasePulse(n1);
     if (g.read_interval > 0 && ((k + 1) % g.read_interval == 0))
       readMap(set, 'D', k + 1);
@@ -316,6 +324,7 @@ void loop() {
   if (!Serial.available()) return;
   if (!parseSerial(g)) return;
 
+  g_abort = false;
   allLinesOff();
   FB_CLR(); HLCHOP_CLR();
   const String &s = g.scenario;
@@ -328,15 +337,15 @@ void loop() {
     runErasePhase(1);
   } else if (s == "PD") {
     readMap(0, 'I', 0);
-    for (int i = 1; i <= g.set_num; i++) { runProgramPhase(i); if (g.phase_gap_ms > 0) delay(g.phase_gap_ms); runErasePhase(i); }
+    for (int i = 1; i <= g.set_num && !g_abort; i++) { runProgramPhase(i); if (g.phase_gap_ms > 0) delay(g.phase_gap_ms); runErasePhase(i); }
   } else if (s == "DP") {
     readMap(0, 'I', 0);
-    for (int i = 1; i <= g.set_num; i++) { runErasePhase(i); if (g.phase_gap_ms > 0) delay(g.phase_gap_ms); runProgramPhase(i); }
+    for (int i = 1; i <= g.set_num && !g_abort; i++) { runErasePhase(i); if (g.phase_gap_ms > 0) delay(g.phase_gap_ms); runProgramPhase(i); }
   } else if (s == "R") {                       // repeated map read (retention / drift)
     int n = (int)g.extra[4]; if (n < 1) n = 1;
     long interval_ms = (long)(g.extra[3] * 1000.0);
-    for (int i = 0; i < n; i++) {
-      if (i > 0 && interval_ms > 0) delay(interval_ms);
+    for (int i = 0; i < n && !checkAbort(); i++) {
+      if (i > 0 && interval_ms > 0) { for (long t = 0; t < interval_ms && !checkAbort(); t += 50) delay(50); }
       readMap(i, 'R', 0);
     }
   } else if (s == "DBGP") {
@@ -352,6 +361,7 @@ void loop() {
   }
 
   allLinesOff();
+  if (g_abort) Serial.println("ABORT>");
   delay(50);
   Serial.println("EOD>");
 }

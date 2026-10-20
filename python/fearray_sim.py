@@ -24,6 +24,10 @@ class FeArraySim:
         self.disturb = disturb
         self.fast = fast
         self.state = [[300.0 for _ in range(5)] for _ in range(5)]   # ADC-ish "cell state"
+        self.aborted = False
+
+    def abort(self) -> None:
+        self.aborted = True
 
     def connect(self, reset_wait: float = 0.0) -> None:
         pass
@@ -64,17 +68,20 @@ class FeArraySim:
     # ── same interface as FeArrayArduino.run ─────────────────────────
     def run(self, p: ScenarioParams, overall_timeout=None, verbose: bool = False) -> Iterator[ReadRecord]:
         t0 = time.time()
+        self.aborted = False
         ri = max(1, p.read_interval)
         s = p.scenario
 
         def phase_P(set_):
             for k in range(p.pot_num):
+                if self.aborted: return
                 self._pulse(p, True)
                 if p.read_interval > 0 and (k + 1) % ri == 0:
                     yield from self._read(p, set_, "P", k + 1, t0)
 
         def phase_D(set_):
             for k in range(p.dep_num):
+                if self.aborted: return
                 self._pulse(p, False)
                 if p.read_interval > 0 and (k + 1) % ri == 0:
                     yield from self._read(p, set_, "D", k + 1, t0)

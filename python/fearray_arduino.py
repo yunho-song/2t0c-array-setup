@@ -116,6 +116,7 @@ class FeArrayArduino:
         self.port = port
         self.timeout = timeout
         self.ser = None
+        self.aborted = False
 
     @staticmethod
     def list_ports() -> List[str]:
@@ -135,6 +136,13 @@ class FeArrayArduino:
             self.ser.close()
             self.ser = None
 
+    def abort(self) -> None:
+        """Ask the firmware to stop the running scenario (it finishes with ABORT> EOD>)."""
+        if self.ser:
+            self.ser.write(b"!")
+            self.ser.flush()
+        self.aborted = True
+
     def send(self, cmd: str) -> None:
         self.ser.reset_input_buffer()
         self.ser.write(cmd.encode("ascii"))
@@ -147,6 +155,7 @@ class FeArrayArduino:
         if verbose:
             print("TX:", cmd)
         self.send(cmd)
+        self.aborted = False
         t0 = time.time()
         while True:
             raw = self.ser.readline()
@@ -159,6 +168,9 @@ class FeArrayArduino:
                 print("RX:", line)
             if line.startswith("EOD"):
                 return
+            if line.startswith("ABORT"):
+                self.aborted = True
+                continue
             if line.startswith("ERR"):
                 raise RuntimeError(f"Arduino: {line}")
             rec = self.parse_line(line, time.time() - t0)
