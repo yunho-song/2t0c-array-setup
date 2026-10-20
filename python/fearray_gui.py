@@ -258,8 +258,22 @@ class FeArrayGUI:
     def _build_plot(self, parent):
         import matplotlib
         matplotlib.use("TkAgg")
+        from matplotlib import font_manager
+        avail = {f.name for f in font_manager.fontManager.ttflist}
+        for fam in ("Malgun Gothic", "AppleGothic", "NanumGothic", "Noto Sans CJK KR", "Noto Sans KR"):
+            if fam in avail:
+                matplotlib.rcParams["font.family"] = fam
+                break
+        matplotlib.rcParams["axes.unicode_minus"] = False
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
         from matplotlib.figure import Figure
+        self.nb = ttk.Notebook(parent)
+        self.nb.grid(row=0, column=0, sticky="nsew")
+        tab1 = ttk.Frame(self.nb); tab2 = ttk.Frame(self.nb)
+        self.nb.add(tab1, text="  실시간 데이터  ")
+        self.nb.add(tab2, text="  파형 미리보기 (현재 파라미터)  ")
+
+        # ── live data ──
         self.fig = Figure(figsize=(7.5, 5.0))
         gs = self.fig.add_gridspec(1, 2, width_ratios=[2.2, 1], wspace=0.3, left=0.1, right=0.97, top=0.92, bottom=0.12)
         self.ax = self.fig.add_subplot(gs[0, 0])
@@ -267,9 +281,110 @@ class FeArrayGUI:
         self.ax.set_xlabel("read index"); self.ax.set_ylabel("ADC [counts]"); self.ax.grid(alpha=0.3)
         self.ax_map.set_title("current map (ADC)")
         self.im = None
-        self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
-        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.canvas = FigureCanvasTkAgg(self.fig, master=tab1)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.canvas.draw()
+
+        # ── waveform preview ──
+        self.wfig = Figure(figsize=(7.5, 5.0))
+        self.wcanvas = FigureCanvasTkAgg(self.wfig, master=tab2)
+        self.wcanvas.get_tk_widget().pack(fill="both", expand=True)
+        self._wave_job = None
+        for v in list(self.pvars.values()) + [self.rmode_var, self.scen_var] + list(self.vvars["base"].values()):
+            v.trace_add("write", lambda *_: self._schedule_wave())
+        self.hold_var.trace_add("write", lambda *_: self._schedule_wave())
+        self._draw_waveforms()
+
+    def _schedule_wave(self):
+        if self._wave_job:
+            self.root.after_cancel(self._wave_job)
+        self._wave_job = self.root.after(300, self._draw_waveforms)
+
+    @staticmethod
+    def _wlen(us: float) -> float:
+        """display width: compressed so 20 µs and 5000 µs are both visible"""
+        import math
+        return 0.6 + math.log10(1 + max(0.0, us))
+
+    def _draw_waveforms(self):
+        self._wave_job = None
+        try:
+            g = lambda k: float(self.pvars[k].get())
+            pre, post, zero = g("pre_en"), g("post_en"), g("zero_t")
+            ppw, dpw = g("pot_pw"), g("dep_pw")
+            rt, rd, rst, rw = g("read_time"), g("read_delay"), g("read_set_time"), g("read_wait_ms")
+            v = {k: float(self.vvars["base"][k].get() or 0) for k in RAILS}
+        except ValueError:
+            return
+        hold = self.hold_var.get()
+        rmode = self.rmode_var.get()
+        fig = self.wfig
+        fig.clear()
+        axes = fig.subplots(3, 1, gridspec_kw={"hspace": 0.9, "left": 0.1, "right": 0.98, "top": 0.94, "bottom": 0.07})
+        C = {"N1": "#0F6E8C", "N2": "#E8912D", "SN": "#2A9D8F", "CON": "#0F6E8C", "CR": "#E8912D", "RWL": "#2A9D8F", "Vcap": "#5B4B8A"}
+
+        def draw(ax, title, tracks, segs_by_track, seg_labels):
+            """tracks: list of names (top→bottom); segs: {name: [(len, level)]}; seg_labels: [(len, text)]"""
+            n = len(tracks)
+            xs = [0.0]
+            for L, _ in seg_labels:
+                xs.append(xs[-1] + L)
+            total = xs[-1]
+            for ti, name in enumerate(tracks):
+                base = (n - 1 - ti) * 1.6
+                x = 0.0
+                segs = segs_by_track[name]
+                px, py = [], []
+                for (L, lv) in segs:
+                    if isinstance(lv, tuple):            # ramp (from, to)
+                        px += [x, x + L]; py += [base + lv[0], base + lv[1]]
+                    else:
+                        px += [x, x + L]; py += [base + lv, base + lv]
+                    x += L
+                ax.plot(px, py, color=C[name], lw=2)
+                ax.text(-0.02 * total, base + 0.5, name, ha="right", va="center", fontsize=9, fontweight="bold", color=C[name])
+            for i, (L, text) in enumerate(seg_labels):
+                if text:
+                    ax.axvspan(xs[i], xs[i + 1], color="k", alpha=0.03 if i % 2 else 0.0, lw=0)
+                    ax.text((xs[i] + xs[i + 1]) / 2, n * 1.6 - 0.25 + (0.0 if i % 2 == 0 else 0.55), text, ha="center", va="bottom", fontsize=7.5, color="#333")
+                    ax.axvline(xs[i + 1], color="#999", lw=0.5, ls=":")
+            ax.set_xlim(-0.18 * total, total); ax.set_ylim(-0.3, n * 1.6 + 1.2)
+            ax.set_xticks([]); ax.set_yticks([])
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+            ax.set_title(title, fontsize=9.5, fontweight="bold", loc="left", pad=14)
+
+        W = self._wlen
+        # ── Program ──
+        wl = [W(pre), W(ppw), W(zero), W(post)]
+        gap = 0.4
+        labs = [(gap, ""), (wl[0], f"pre_en\n{pre:g} µs"), (wl[1], f"pot_pw\n{ppw:g} µs"), (wl[2], f"zero_t\n{zero:g} µs"), (wl[3], f"post_en\n{post:g} µs"), (gap, "")]
+        n1 = [(gap, 1 if hold else 0), (wl[0], 1), (wl[1], 1), (wl[2], 1), (wl[3], 1 if hold else 0), (gap, 1 if hold else 0)]
+        n2 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
+        sn = [(gap, 0.3 if hold else 0.15), (wl[0], 0.3), (wl[1], 1), (wl[2], 0.3), (wl[3], 0.3 if hold else 0.15), (gap, 0.3 if hold else 0.15)]
+        draw(axes[0], f"PROGRAM pulse ×1    N1=WWL {v['WWL_OFF']:g}→{v['WWL_ON']:g} V    N2=WBL {v['WBL_OFF']:g}→{v['WBL_PROG']:g} V    SN = FeFET gate" + ("    [wwl_hold]" if hold else ""),
+             ["N1", "N2", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
+        # ── Erase ──
+        wl = [W(pre), W(dpw), W(post), W(zero)]
+        labs = [(gap, "N2 OFF"), (wl[0], f"pre_en\n{pre:g} µs"), (wl[1], f"dep_pw\n{dpw:g} µs"), (wl[2], f"post_en\n{post:g} µs"), (wl[3], f"zero_t\n{zero:g} µs"), (gap, "")]
+        n2 = [(gap, 0), (wl[0], 0), (wl[1], 0), (wl[2], 0), (wl[3], 0), (gap, 0)]
+        n1 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
+        sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.15), (wl[3], 0.15), (gap, 0.15)]
+        draw(axes[1], f"ERASE pulse ×1    WBL fixed = WBL_OFF {v['WBL_OFF']:g} V    N1=WWL pulse → SN pulled to {v['WBL_OFF']:g} V",
+             ["N2", "N1", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
+        # ── Read (one row) ──
+        tint = rt * 100.0; tdel = rd * 10.0
+        wl = [W(rw * 1000), W(rst) if rmode != "N1OFF" else 0.3, W(tint), W(tdel), 0.9, W(3000)]
+        labs = [(wl[0], f"read_wait\n{rw:g} ms"), (wl[1], f"read_set\n{rst:g} µs" if rmode != "N1OFF" else ""), (wl[2], f"read_time {rt:g}×100 µs\n= {tint/1000:g} ms integrate"), (wl[3], f"read_delay\n{rd:g}×10 µs"), (0.9, "ADC\nsample"), (wl[5], "CR clear\n3 ms")]
+        con = [(wl[0], 1), (wl[1], 0), (wl[2], 0), (wl[3], 0), (0.9, 1), (wl[5], 1)]
+        cr = [(wl[0], 0), (wl[1], 1), (wl[2], 1), (wl[3], 1), (0.9, 1), (wl[5], 0)]
+        rwl = [(wl[0], 0), (wl[1], 0), (wl[2], 1), (wl[3], 0), (0.9, 0), (wl[5], 0)]
+        vc = [(wl[0], 0), (wl[1], 0), (wl[2], (0, 0.8)), (wl[3], 0.8), (0.9, 0.8), (wl[5], (0.8, 0))]
+        draw(axes[2], f"READ one row (5 cols at once)    read_mode={rmode}    1 ADC count ≈ {3000e-12*4/4095*3.3/(tint*1e-6)*1e9:.2f} nA",
+             ["CON", "CR", "RWL", "Vcap"], {"CON": con, "CR": cr, "RWL": rwl, "Vcap": vc}, labs)
+        axes[2].text(0.0, -0.3, "CON LOW = cell-integrator connected,  CR HIGH = cap open (integrating),  Vcap slope ∝ I_RBL.   x-axis is log-compressed (not to scale)",
+                     transform=axes[2].transAxes, fontsize=7.5, color="gray")
+        self.wcanvas.draw_idle()
 
     def _build_log(self, parent):
         f = ttk.Frame(parent)
