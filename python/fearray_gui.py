@@ -16,6 +16,8 @@ but everything is entered in a window instead of a YAML file:
 
 Run:   python fearray_gui.py            (pip install -r requirements.txt first)
        python fearray_gui.py --sim      start with simulation mode ticked
+       python fearray_gui.py --fonts    list Tk fonts and whether they render Hangul
+       python fearray_gui.py --font "NanumGothic"   force a UI font   /   --en  force English labels
 Settings can be saved/loaded as the same YAML that fearray_measure.py uses.
 """
 from __future__ import annotations
@@ -56,27 +58,65 @@ def t(s: str) -> str:
     return s if _UI_KO else _EN.get(s, s)
 
 
+def _font_renders_hangul(root, family: str) -> bool:
+    """True if Tk can actually draw Hangul with this family (not as \\uXXXX escapes)."""
+    import tkinter.font as tkfont
+    try:
+        f = tkfont.Font(root=root, family=family, size=10)
+        return f.measure("한글") < 3.5 * f.measure("ab") and f.measure("한") > 0
+    except Exception:
+        return False
+
+
+def list_fonts(root):
+    import tkinter.font as tkfont
+    fams = sorted(set(tkfont.families(root)))
+    return [(f, _font_renders_hangul(root, f)) for f in fams]
+
+
 def setup_fonts(root) -> bool:
     global _UI_KO
     import tkinter.font as tkfont
-    fams = set(tkfont.families(root))
-    chosen = next((f for f in KO_FONTS if f in fams), None)
-    if "--en" in sys.argv:
-        chosen = None
+    chosen = None
+    if "--en" not in sys.argv:
+        # explicit --font NAME
+        if "--font" in sys.argv:
+            try:
+                chosen = sys.argv[sys.argv.index("--font") + 1]
+            except IndexError:
+                chosen = None
+        if chosen is None:
+            fams = set(tkfont.families(root))
+            cands = [f for f in KO_FONTS if f in fams]
+            cands += [f for f in sorted(fams) if any(k in f for k in ("Nanum", "나눔", "Gothic", "고딕", "CJK", "Gulim", "굴림", "Batang", "바탕", "Dotum", "돋움"))]
+            cands += list(KO_FONTS)            # try by name even if not listed (fontconfig may still resolve it)
+            seen = set()
+            for f in cands:
+                if f in seen:
+                    continue
+                seen.add(f)
+                if _font_renders_hangul(root, f):
+                    chosen = f
+                    break
     if chosen:
-        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont", "TkTooltipFont"):
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont", "TkSmallCaptionFont", "TkTooltipFont", "TkFixedFont"):
             try:
                 tkfont.nametofont(name).configure(family=chosen, size=9)
             except Exception:
                 pass
         try:
-            ttk.Style().configure(".", font=(chosen, 9))
+            st = ttk.Style()
+            for w in (".", "TLabel", "TButton", "TCheckbutton", "TLabelframe.Label", "TNotebook.Tab", "TEntry", "TCombobox"):
+                st.configure(w, font=(chosen, 9))
         except Exception:
             pass
         _UI_KO = True
+        print(f"[fearray_gui] Korean UI font: {chosen}")
     else:
         _UI_KO = False
+        print("[fearray_gui] no font renders Hangul -> English labels (install fonts-nanum, or run with --font NAME; --fonts lists candidates)")
     return _UI_KO
+
 
 _EN.update({
     '보드 아날로그 전원': 'board analog supply',
@@ -447,10 +487,15 @@ class FeArrayGUI:
             return
         hold = self.hold_var.get()
         rmode = self.rmode_var.get()
+        L = {k: t(lab) for k, lab, *_ in PARAM_FIELDS}       # GUI field label for each firmware key
         fig = self.wfig
         fig.clear()
-        axes = fig.subplots(3, 1, gridspec_kw={"hspace": 0.9, "left": 0.1, "right": 0.98, "top": 0.94, "bottom": 0.07})
+        axes = fig.subplots(3, 1, gridspec_kw={"hspace": 1.15, "left": 0.1, "right": 0.98, "top": 0.93, "bottom": 0.07})
         C = {"N1": "#0F6E8C", "N2": "#E8912D", "SN": "#2A9D8F", "CON": "#0F6E8C", "CR": "#E8912D", "RWL": "#2A9D8F", "Vcap": "#5B4B8A"}
+        NAME = {"N1": "N1 (WWL)", "N2": "N2 (WBL)", "SN": "SN", "CON": "CON", "CR": "CR", "RWL": "RWL", "Vcap": "Vcap"}
+        MAP_W = (f"N1=WWL: LOW→WWL_OFF {v['WWL_OFF']:g} V / HIGH→WWL_ON {v['WWL_ON']:g} V     "
+                 f"N2=WBL: LOW→WBL_OFF {v['WBL_OFF']:g} V / HIGH→WBL_PROG {v['WBL_PROG']:g} V     SN = FeFET gate")
+        MAP_R = (f"CON LOW = cell↔integrator    CR HIGH = cap open    RWL HIGH = VREAD {v['VREAD']:g} V    Vcap → ADC")
 
         def draw(ax, title, tracks, segs_by_track, seg_labels):
             """tracks: list of names (top→bottom); segs: {name: [(len, level)]}; seg_labels: [(len, text)]"""
@@ -471,47 +516,50 @@ class FeArrayGUI:
                         px += [x, x + L]; py += [base + lv, base + lv]
                     x += L
                 ax.plot(px, py, color=C[name], lw=2)
-                ax.text(-0.02 * total, base + 0.5, name, ha="right", va="center", fontsize=9, fontweight="bold", color=C[name])
+                ax.text(-0.02 * total, base + 0.5, NAME.get(name, name), ha="right", va="center", fontsize=8.5, fontweight="bold", color=C[name])
             for i, (L, text) in enumerate(seg_labels):
                 if text:
                     ax.axvspan(xs[i], xs[i + 1], color="k", alpha=0.03 if i % 2 else 0.0, lw=0)
                     ax.text((xs[i] + xs[i + 1]) / 2, n * 1.6 - 0.25 + (0.0 if i % 2 == 0 else 0.55), text, ha="center", va="bottom", fontsize=7.5, color="#333")
                     ax.axvline(xs[i + 1], color="#999", lw=0.5, ls=":")
-            ax.set_xlim(-0.18 * total, total); ax.set_ylim(-0.3, n * 1.6 + 1.2)
+            ax.set_xlim(-0.14 * total, total); ax.set_ylim(-0.3, n * 1.6 + 1.2)
             ax.set_xticks([]); ax.set_yticks([])
             for sp in ax.spines.values():
                 sp.set_visible(False)
-            ax.set_title(title, fontsize=9.5, fontweight="bold", loc="left", pad=14)
+            ax.set_title(title, fontsize=9, fontweight="bold", loc="left", pad=18)
 
         W = self._wlen
         # ── Program ──
         wl = [W(pre), W(ppw), W(zero), W(post)]
         gap = 0.4
-        labs = [(gap, ""), (wl[0], f"pre_en\n{pre:g} µs"), (wl[1], f"pot_pw\n{ppw:g} µs"), (wl[2], f"zero_t\n{zero:g} µs"), (wl[3], f"post_en\n{post:g} µs"), (gap, "")]
+        labs = [(gap, ""), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['pot_pw']}\n= {ppw:g}"), (wl[2], f"{L['zero_t']}\n= {zero:g}"), (wl[3], f"{L['post_en']}\n= {post:g}"), (gap, "")]
         n1 = [(gap, 1 if hold else 0), (wl[0], 1), (wl[1], 1), (wl[2], 1), (wl[3], 1 if hold else 0), (gap, 1 if hold else 0)]
         n2 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
         sn = [(gap, 0.3 if hold else 0.15), (wl[0], 0.3), (wl[1], 1), (wl[2], 0.3), (wl[3], 0.3 if hold else 0.15), (gap, 0.3 if hold else 0.15)]
-        draw(axes[0], f"PROGRAM pulse ×1    N1=WWL {v['WWL_OFF']:g}→{v['WWL_ON']:g} V    N2=WBL {v['WBL_OFF']:g}→{v['WBL_PROG']:g} V    SN = FeFET gate" + ("    [wwl_hold]" if hold else ""),
+        draw(axes[0], f"PROGRAM pulse ×1  (scenario P / PD)   segment labels = GUI fields [µs]" + (f"    [{t('P 중 WWL 유지')}]" if hold else ""),
              ["N1", "N2", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
+        axes[0].text(0.0, -0.04, MAP_W, transform=axes[0].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         # ── Erase ──
         wl = [W(pre), W(dpw), W(post), W(zero)]
-        labs = [(gap, "N2 OFF"), (wl[0], f"pre_en\n{pre:g} µs"), (wl[1], f"dep_pw\n{dpw:g} µs"), (wl[2], f"post_en\n{post:g} µs"), (wl[3], f"zero_t\n{zero:g} µs"), (gap, "")]
+        labs = [(gap, "N2 OFF"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['post_en']}\n= {post:g}"), (wl[3], f"{L['zero_t']}\n= {zero:g}"), (gap, "")]
         n2 = [(gap, 0), (wl[0], 0), (wl[1], 0), (wl[2], 0), (wl[3], 0), (gap, 0)]
         n1 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
         sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.15), (wl[3], 0.15), (gap, 0.15)]
-        draw(axes[1], f"ERASE pulse ×1    WBL fixed = WBL_OFF {v['WBL_OFF']:g} V    N1=WWL pulse → SN pulled to {v['WBL_OFF']:g} V",
+        draw(axes[1], f"ERASE pulse ×1  (scenario D / PD)   N2 stays LOW → WBL = WBL_OFF {v['WBL_OFF']:g} V, N1 pulse pulls SN to it",
              ["N2", "N1", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
+        axes[1].text(0.0, -0.04, MAP_W, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         # ── Read (one row) ──
         tint = rt * 100.0; tdel = rd * 10.0
         wl = [W(rw * 1000), W(rst) if rmode != "N1OFF" else 0.3, W(tint), W(tdel), 0.9, W(3000)]
-        labs = [(wl[0], f"read_wait\n{rw:g} ms"), (wl[1], f"read_set\n{rst:g} µs" if rmode != "N1OFF" else ""), (wl[2], f"read_time {rt:g}×100 µs\n= {tint/1000:g} ms integrate"), (wl[3], f"read_delay\n{rd:g}×10 µs"), (0.9, "ADC\nsample"), (wl[5], "CR clear\n3 ms")]
-        con = [(wl[0], 1), (wl[1], 0), (wl[2], 0), (wl[3], 0), (0.9, 1), (wl[5], 1)]
-        cr = [(wl[0], 0), (wl[1], 1), (wl[2], 1), (wl[3], 1), (0.9, 1), (wl[5], 0)]
-        rwl = [(wl[0], 0), (wl[1], 0), (wl[2], 1), (wl[3], 0), (0.9, 0), (wl[5], 0)]
-        vc = [(wl[0], 0), (wl[1], 0), (wl[2], (0, 0.8)), (wl[3], 0.8), (0.9, 0.8), (wl[5], (0.8, 0))]
-        draw(axes[2], f"READ one row (5 cols at once)    read_mode={rmode}    1 ADC count ≈ {3000e-12*4/4095*3.3/(tint*1e-6)*1e9:.2f} nA",
+        labs = [(wl[0], f"{L['read_wait_ms']}\n= {rw:g}"), (wl[1], f"{L['read_set_time']}\n= {rst:g}" if rmode != "N1OFF" else ""), (wl[2], f"{L['read_time']} = {rt:g}\n×100 µs = {tint/1000:g} ms"), (wl[3], f"{L['read_delay']}={rd:g}\n×10µs={tdel:g}µs"), (1.3, f"ADC\n×{int(g('avg_count'))}"), (wl[5], "CR clear\n3 ms")]
+        con = [(wl[0], 1), (wl[1], 0), (wl[2], 0), (wl[3], 0), (1.3, 1), (wl[5], 1)]
+        cr = [(wl[0], 0), (wl[1], 1), (wl[2], 1), (wl[3], 1), (1.3, 1), (wl[5], 0)]
+        rwl = [(wl[0], 0), (wl[1], 0), (wl[2], 1), (wl[3], 0), (1.3, 0), (wl[5], 0)]
+        vc = [(wl[0], 0), (wl[1], 0), (wl[2], (0, 0.8)), (wl[3], 0.8), (1.3, 0.8), (wl[5], (0.8, 0))]
+        draw(axes[2], f"READ one row (5 cols at once)   {t('Read 중 WWL')} = {rmode}   1 ADC count ≈ {3000e-12*4/4095*3.3/(tint*1e-6)*1e9:.2f} nA",
              ["CON", "CR", "RWL", "Vcap"], {"CON": con, "CR": cr, "RWL": rwl, "Vcap": vc}, labs)
-        axes[2].text(0.0, -0.3, "CON LOW = cell-integrator connected,  CR HIGH = cap open (integrating),  Vcap slope ∝ I_RBL.   x-axis is log-compressed (not to scale)",
+        axes[2].text(0.0, -0.04, MAP_R, transform=axes[2].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
+        axes[2].text(0.0, -0.3, "Vcap slope ∝ I_RBL (FeFET state).   x-axis is log-compressed (not to scale).  Segment labels = GUI field names.",
                      transform=axes[2].transAxes, fontsize=7.5, color="gray")
         self.wcanvas.draw_idle()
 
@@ -909,6 +957,10 @@ class FeArrayGUI:
 def main():
     sim = "--sim" in sys.argv
     root = tk.Tk()
+    if "--fonts" in sys.argv:
+        for fam, ok in list_fonts(root):
+            print(("HANGUL OK  " if ok else "           ") + fam)
+        return
     try:
         ttk.Style().theme_use("clam")
     except Exception:
