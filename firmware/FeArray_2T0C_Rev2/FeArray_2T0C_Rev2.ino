@@ -43,7 +43,7 @@
  *  18  extra2        read_wait   : delay before each read [ms]
  *  19  extra3        R scenario  : interval between map reads [s]
  *  20  extra4        R scenario  : number of map reads
- *  21  extra5        (reserved)
+ *  21  extra5        phase_gap_ms: PD/DP에서 P phase와 D phase 사이 대기 [ms]
  *
  *  Example:  PD,1,1,3,10,10,5000,5000,20,20,20,1000,1,20,1,N1OFF,10,0,100,0,0,0|
  *            -> cell (0,0), 3 sets of 10 P + 10 D pulses of 5 ms, read after every pulse,
@@ -107,11 +107,19 @@ struct Params {
   int avg_count;
   int wwl_hold;
   int read_wait_ms;
+  int phase_gap_ms;
 };
 Params g;
 int adc_row[5];
 
 // ───────────────────────────── HELPERS ────────────────────────────────
+// delayMicroseconds()는 큰 값에서 정확도가 떨어지므로 ms 단위는 delay()로 분리
+void udelay(long us) {
+  if (us <= 0) return;
+  if (us >= 1000) { delay(us / 1000); us %= 1000; }
+  if (us > 0) delayMicroseconds((unsigned int)us);
+}
+
 uint32_t maskToPins(int mask, const uint32_t *table) {
   uint32_t a = 0;
   for (int i = 0; i < 5; i++) if (mask & (1 << i)) a |= table[i];
@@ -130,15 +138,15 @@ void allLinesOff() {
 void programPulse(uint32_t n1, uint32_t n2) {
   if (!g.wwl_hold) {
     PIOC->PIO_SODR = n1;
-    delayMicroseconds(g.pre_en);
+    udelay(g.pre_en);
   }
   PIOC->PIO_SODR = n2;
-  delayMicroseconds(g.pot_pw);
+  udelay(g.pot_pw);
   PIOC->PIO_CODR = n2;
-  delayMicroseconds(g.zero_t);          // gate -> V_WBL_OFF through WTR
+  udelay(g.zero_t);          // gate -> V_WBL_OFF through WTR
   if (!g.wwl_hold) {
     PIOC->PIO_CODR = n1;
-    delayMicroseconds(g.post_en);
+    udelay(g.post_en);
   }
 }
 
@@ -146,12 +154,12 @@ void programPulse(uint32_t n1, uint32_t n2) {
 //   N2 OFF -> pre -> N1 ON -> pw -> N1 OFF -> post -> zero
 void erasePulse(uint32_t n1) {
   PIOC->PIO_CODR = N2_ALL;
-  delayMicroseconds(g.pre_en);
+  udelay(g.pre_en);
   PIOC->PIO_SODR = n1;
-  delayMicroseconds(g.dep_pw);
+  udelay(g.dep_pw);
   PIOC->PIO_CODR = n1;
-  delayMicroseconds(g.post_en);
-  delayMicroseconds(g.zero_t);
+  udelay(g.post_en);
+  udelay(g.zero_t);
 }
 
 // ───────────────────────────── READ ───────────────────────────────────
@@ -202,7 +210,7 @@ void readMap(int set, char phase, int pulse) {
   bool held = g.wwl_hold && (phase == 'P');  // caller already holds selected N1
   if (n1_read) {
     PIOC->PIO_SODR = n1_read;
-    delayMicroseconds(g.read_set_time);
+    udelay(g.read_set_time);
   }
 
   for (int r = 0; r < 5; r++) {
@@ -228,7 +236,7 @@ void runProgramPhase(int set) {
   PIOC->PIO_CODR = N2_ALL;
   if (g.wwl_hold) {                        // old FE mode: hold selected WWL ON
     PIOC->PIO_SODR = n1;
-    delayMicroseconds(g.read_set_time);
+    udelay(g.read_set_time);
   }
   for (int k = 0; k < g.pot_num; k++) {
     programPulse(n1, n2);
@@ -286,6 +294,7 @@ bool parseSerial(Params &p) {
   p.avg_count    = (int)p.extra[0]; if (p.avg_count < 1) p.avg_count = 1;
   p.wwl_hold     = (int)p.extra[1] ? 1 : 0;
   p.read_wait_ms = (int)p.extra[2];
+  p.phase_gap_ms = (int)p.extra[5];
   if (p.read_mode != "N1ALL" && p.read_mode != "N1SEL") p.read_mode = "N1OFF";
   return true;
 }
@@ -319,10 +328,10 @@ void loop() {
     runErasePhase(1);
   } else if (s == "PD") {
     readMap(0, 'I', 0);
-    for (int i = 1; i <= g.set_num; i++) { runProgramPhase(i); runErasePhase(i); }
+    for (int i = 1; i <= g.set_num; i++) { runProgramPhase(i); if (g.phase_gap_ms > 0) delay(g.phase_gap_ms); runErasePhase(i); }
   } else if (s == "DP") {
     readMap(0, 'I', 0);
-    for (int i = 1; i <= g.set_num; i++) { runErasePhase(i); runProgramPhase(i); }
+    for (int i = 1; i <= g.set_num; i++) { runErasePhase(i); if (g.phase_gap_ms > 0) delay(g.phase_gap_ms); runProgramPhase(i); }
   } else if (s == "R") {                       // repeated map read (retention / drift)
     int n = (int)g.extra[4]; if (n < 1) n = 1;
     long interval_ms = (long)(g.extra[3] * 1000.0);

@@ -16,9 +16,9 @@ psu:
     VDD:      {psu: 1, ch: 1, negative: false, current_limit: 0.50}   # CH1: 6 V max
     WWL_ON:   {psu: 1, ch: 2, negative: false, current_limit: 0.05}
     WWL_OFF:  {psu: 1, ch: 3, negative: true,  current_limit: 0.05}
-    WBL_OFF:  {psu: 2, ch: 1, negative: false, current_limit: 0.05}   # CH1: 6 V max
+    VREAD:    {psu: 2, ch: 1, negative: false, current_limit: 0.05}   # CH1: 6 V max
     WBL_PROG: {psu: 2, ch: 2, negative: false, current_limit: 0.05}
-    VREAD:    {psu: 2, ch: 3, negative: false, current_limit: 0.05}
+    WBL_OFF:  {psu: 2, ch: 3, negative: true,  current_limit: 0.05}   # erase level: 0 or negative -> wired inverted
   on_order:  [VDD, WWL_OFF, WBL_OFF, VREAD, WWL_ON, WBL_PROG]
   off_order: [WBL_PROG, WWL_ON, VREAD, WBL_OFF, WWL_OFF, VDD]
   ramp_steps: 3
@@ -31,7 +31,7 @@ voltages:
   WWL_ON: 3.0          # WTR gate ON  (N1 pin HIGH)
   WWL_OFF: -2.0        # WTR gate OFF (N1 pin LOW)
   WBL_PROG: 4.0        # program level on WBL (N2 pin HIGH)
-  WBL_OFF: 0.0         # erase / read-write level on WBL (N2 pin LOW)
+  WBL_OFF: 0.0         # erase / read-write level on WBL (N2 pin LOW). 0 or negative (rail wired inverted)
   VREAD: 1.0
 
 # ── Default scenario parameters (firmware fields) ──
@@ -54,6 +54,7 @@ defaults:
   avg_count: 10        # ADC samples averaged per cell read
   wwl_hold: 0          # 1 = keep selected WWL ON through the whole program phase (old FE mode)
   read_wait_ms: 100    # delay before each map read
+  phase_gap_ms: 0      # PD/DP (firmware-only mode): wait between P phase and D phase [ms]
 
 # ── Experiments (run in order). Any defaults/voltages key can be overridden. ──
 experiments:
@@ -67,6 +68,16 @@ experiments:
     rows: [0]
     cols: [0]
     set_num: 3
+
+  - name: cell00_PD_splitV      # P와 D에 서로 다른 PSU 전압: Python이 phase 사이에 rail을 바꿈
+    scenario: PD
+    rows: [0]
+    cols: [0]
+    set_num: 2
+    phase_voltages:             # 없는 키는 voltages: 기본값 사용
+      P: {WBL_PROG: 4.0, WBL_OFF: 0.0, WWL_ON: 3.0}
+      D: {WBL_OFF: -3.0, WWL_ON: 4.0}
+    phase_gap_s: 1.0            # phase 전환 후 추가 대기 (PSU settle 이후)
 
   - name: cell22_PD_nohold
     scenario: PD

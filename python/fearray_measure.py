@@ -184,7 +184,8 @@ class ExperimentWriter:
         d = maps[-1] - maps[0]
         sel = np.array([d[r, c] for (r, c) in self.sel])
         uns = np.array([d[r, c] for r in range(5) for c in range(5) if (r, c) not in self.sel])
-        print(f"  Δ selected  : mean {sel.mean():+.1f}  (n={len(sel)})")
+        if len(sel):
+            print(f"  Δ selected  : mean {sel.mean():+.1f}  (n={len(sel)})")
         if len(uns):
             print(f"  Δ unselected: mean {uns.mean():+.1f}  max|Δ| {np.abs(uns).max():.1f}  (n={len(uns)})")
 
@@ -234,36 +235,75 @@ def main(argv=None) -> int:
         psu.connect()
 
     base_voltages = dict(cfg.get("voltages", {}))
+    settle = float(cfg.get("psu", {}).get("settle_after_apply_s", 1.0))
+
+    def set_rails(volts: Dict[str, float]) -> None:
+        if psu is not None:
+            psu.apply(volts)
+            time.sleep(settle)
+        elif volts:
+            print("  (PSU not controlled) expected rails:", volts)
+
+    def stream(p: ScenarioParams, w: ExperimentWriter, exp: Dict, n_expected: int,
+               set_override: int = None, drop_initial: bool = False) -> None:
+        """Run one firmware scenario and feed records into the writer."""
+        sel_vals: List[int] = []
+        for rec in ard.run(p, overall_timeout=exp.get("timeout_s"), verbose=args.verbose):
+            if drop_initial and rec.phase == "I":
+                continue
+            if set_override is not None:
+                rec.set = set_override
+            w.add(rec)
+            if rec.row == 0:
+                sel_vals = []
+            if rec.row in p.rows:
+                sel_vals += [rec.adc[c] for c in p.cols]
+            if rec.row == 4:
+                print(f"\r  read {w.read_idx + 1}/{n_expected}  set {rec.set} {rec.phase}{rec.pulse:>4}"
+                      f"  t={rec.t:6.1f}s  selected={sel_vals}", end="", flush=True)
+
     try:
         for exp in experiments:
             name = exp["name"]
             p = build_params(cfg.get("defaults", {}), exp)
             volts = dict(base_voltages, **exp.get("voltages", {}))
+            split = exp.get("phase_voltages")          # {"P": {...}, "D": {...}} -> separate rails per phase
             print(f"\n=== {name}: {p.scenario} rows={p.rows} cols={p.cols} "
-                  f"P={p.pot_num}x{p.pot_pw}us D={p.dep_num}x{p.dep_pw}us sets={p.set_num} ===")
-            if psu is not None:
-                psu.apply(volts)
-                time.sleep(float(cfg.get("psu", {}).get("settle_after_apply_s", 1.0)))
-            elif volts:
-                print("  (PSU not controlled) expected rails:", volts)
+                  f"P={p.pot_num}x{p.pot_pw}us D={p.dep_num}x{p.dep_pw}us sets={p.set_num}"
+                  f"{'  [phase_voltages]' if split else ''} ===")
 
-            w = ExperimentWriter(out_dir, name, p, psu.rails if psu else {}, volts)
-            n_expected = p.expected_reads()
             t0 = time.time()
-            sel_vals: List[int] = []
-            try:
-                for rec in ard.run(p, overall_timeout=exp.get("timeout_s"), verbose=args.verbose):
-                    w.add(rec)
-                    if rec.row == 0:
-                        sel_vals = []
-                    if rec.row in p.rows:
-                        sel_vals += [rec.adc[c] for c in p.cols]
-                    if rec.row == 4:
-                        print(f"\r  read {w.read_idx + 1}/{n_expected}  set {rec.set} {rec.phase}{rec.pulse:>4}"
-                              f"  t={rec.t:6.1f}s  selected={sel_vals}", end="", flush=True)
-            finally:
-                print(f"\n  done in {time.time() - t0:.1f}s -> {w.dir}")
-                w.close()
+            if split and p.scenario in ("PD", "DP"):
+                # Python-driven PD: PSU rails changed between phases, all data in ONE experiment folder.
+                vP = dict(volts, **(split.get("P") or {}))
+                vD = dict(volts, **(split.get("D") or {}))
+                gap = float(exp.get("phase_gap_s", p.phase_gap_ms / 1000.0))
+                w = ExperimentWriter(out_dir, name, p, psu.rails if psu else {},
+                                     {"base": volts, "P": vP, "D": vD})
+                order = ["P", "D"] if p.scenario == "PD" else ["D", "P"]
+                ri = max(1, p.read_interval)
+                n_expected = 1 + p.set_num * (p.pot_num // ri + p.dep_num // ri)
+                try:
+                    first = True
+                    for i in range(1, p.set_num + 1):
+                        for ph in order:
+                            set_rails(vP if ph == "P" else vD)
+                            q = ScenarioParams(**{**asdict(p), "scenario": ph, "set_num": 1})
+                            stream(q, w, exp, n_expected, set_override=i, drop_initial=not first)
+                            first = False
+                            if gap > 0:
+                                time.sleep(gap)
+                finally:
+                    print(f"\n  done in {time.time() - t0:.1f}s -> {w.dir}")
+                    w.close()
+            else:
+                set_rails(volts)
+                w = ExperimentWriter(out_dir, name, p, psu.rails if psu else {}, volts)
+                try:
+                    stream(p, w, exp, p.expected_reads())
+                finally:
+                    print(f"\n  done in {time.time() - t0:.1f}s -> {w.dir}")
+                    w.close()
             time.sleep(float(exp.get("pause_after_s", 0)))
     finally:
         ard.close()

@@ -74,6 +74,7 @@ class ScenarioParams:
     read_wait_ms: int = 100
     r_interval_s: float = 0.0       # R scenario
     r_points: int = 1               # R scenario
+    phase_gap_ms: int = 0           # PD/DP: wait between P and D phase [ms]
 
     def to_command(self) -> str:
         f = [self.scenario, mask(self.rows), mask(self.cols),
@@ -82,7 +83,7 @@ class ScenarioParams:
              self.read_time, self.read_set_time, self.read_delay, self.read_interval,
              self.read_mode.upper(),
              self.avg_count, self.wwl_hold, self.read_wait_ms,
-             self.r_interval_s, self.r_points, 0]
+             self.r_interval_s, self.r_points, self.phase_gap_ms]
         return ",".join(str(x) for x in f) + "|"
 
     def expected_reads(self) -> int:

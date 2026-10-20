@@ -20,9 +20,9 @@ YAML example (psu section):
       rails:                         # name: {psu, ch, negative, current_limit}
         WWL_ON:   {psu: 1, ch: 2, negative: false, current_limit: 0.05}
         WWL_OFF:  {psu: 1, ch: 3, negative: true,  current_limit: 0.05}
+        VREAD:    {psu: 2, ch: 1, negative: false, current_limit: 0.05}
         WBL_PROG: {psu: 2, ch: 2, negative: false, current_limit: 0.05}
-        WBL_OFF:  {psu: 2, ch: 1, negative: false, current_limit: 0.05}
-        VREAD:    {psu: 2, ch: 3, negative: false, current_limit: 0.05}
+        WBL_OFF:  {psu: 2, ch: 3, negative: true,  current_limit: 0.05}
         VDD:      {psu: 1, ch: 1, negative: false, current_limit: 0.50}
       on_order:  [VDD, WWL_OFF, WBL_OFF, VREAD, WWL_ON, WBL_PROG]
       off_order: [WBL_PROG, WWL_ON, VREAD, WBL_OFF, WWL_OFF, VDD]
@@ -48,9 +48,9 @@ DEFAULT_RAILS = {
     "VDD":      {"psu": 1, "ch": 1, "negative": False, "current_limit": 0.5},
     "WWL_ON":   {"psu": 1, "ch": 2, "negative": False, "current_limit": 0.05},
     "WWL_OFF":  {"psu": 1, "ch": 3, "negative": True,  "current_limit": 0.05},
-    "WBL_OFF":  {"psu": 2, "ch": 1, "negative": False, "current_limit": 0.05},
+    "VREAD":    {"psu": 2, "ch": 1, "negative": False, "current_limit": 0.05},
     "WBL_PROG": {"psu": 2, "ch": 2, "negative": False, "current_limit": 0.05},
-    "VREAD":    {"psu": 2, "ch": 3, "negative": False, "current_limit": 0.05},
+    "WBL_OFF":  {"psu": 2, "ch": 3, "negative": True,  "current_limit": 0.05},
 }
 DEFAULT_ON_ORDER = ["VDD", "WWL_OFF", "WBL_OFF", "VREAD", "WWL_ON", "WBL_PROG"]
 DEFAULT_OFF_ORDER = list(reversed(DEFAULT_ON_ORDER))

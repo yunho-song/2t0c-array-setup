@@ -80,6 +80,40 @@ EOD>
   row 0~4 반복 = 25셀 맵 1회. ADC ∝ V_cap = (1/C)∫I_RBL dt 이므로 Program 후 ↑, Erase 후 ↓.
   `read_mode`로 read 중 WWL 상태 선택: `N1OFF` WTR OFF(기본, 논문 방식) / `N1ALL` 5 col 모두 ON(게이트=WBL_OFF) / `N1SEL` 선택 col만 ON
 
+## 타이밍 파라미터 (전부 yaml `defaults:` / 실험별 오버라이드, 단위 µs 아니면 표기)
+
+| 키 | 기본 | 어디에 쓰이나 |
+|---|---|---|
+| `pot_pw` / `dep_pw` | 5000 | Program / Erase 펄스 폭 |
+| `pre_en` | 20 | Program: N1 ON 후 N2 ON까지 · Erase: N2 OFF 확정 후 N1 ON까지 |
+| `post_en` | 20 | 펄스 끝난 뒤 다음 라인 변경까지 |
+| `zero_t` | 20 | Program: N2 OFF 후 게이트가 WBL_OFF로 복귀하는 시간 · Erase: 마지막 대기 |
+| `read_wait_ms` | 100 ms | 맵 read 직전 대기 |
+| `read_set_time` | 20 | N1ALL/N1SEL read에서 WWL ON 후 게이트 안정화 |
+| `read_time` | 1000 (×100 µs) | RWL 적분 시간 |
+| `read_delay` | 20 (×10 µs) | 적분 끝 → ADC 샘플 사이 settle |
+| `phase_gap_ms` | 0 ms | 펌웨어 PD/DP에서 P→D 사이 대기 |
+| `phase_gap_s` | — | `phase_voltages` 모드에서 phase 전환 후 추가 대기 (PSU settle 뒤) |
+| `pause_after_s` | 0 | 실험 사이 대기 |
+
+펌웨어 고정값: RWL 주기 100 µs(`RWL_PERIOD_US`), cap clear 3 ms(`CAP_CLEAR_MS`), read_delay 단위 10 µs. µs 값은 `udelay()`가 ms+µs로 나눠 처리하므로 수십 ms 펄스도 됨.
+
+## P와 D에 다른 전압 쓰기 (`phase_voltages`)
+
+```yaml
+  - name: cell00_PD_splitV
+    scenario: PD            # DP 도 가능
+    rows: [0]
+    cols: [0]
+    set_num: 2
+    phase_voltages:         # 없는 키는 voltages: 값 사용
+      P: {WBL_PROG: 4.0, WBL_OFF: 0.0, WWL_ON: 3.0}
+      D: {WBL_OFF: -3.0, WWL_ON: 4.0}
+    phase_gap_s: 1.0
+```
+Python이 set마다 P rail 적용 → 펌웨어 `P` 실행 → D rail 적용 → `D` 실행을 반복하고, 데이터는 한 폴더(`set` 열로 구분)에 이어서 저장된다. 펌웨어 단독 `PD`는 rail 변경 없이 같은 전압으로 P→D를 돈다.
+`WBL_OFF`에 음수를 쓰려면 그 채널을 `negative: true`로 배선해야 한다 (기본 yaml은 PSU2 CH3을 그렇게 배정).
+
 ## 전압 rail (PSU)
 
 | rail | 의미 | 아두이노 핀 상태 |
