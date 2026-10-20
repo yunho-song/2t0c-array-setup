@@ -1,0 +1,20 @@
+# measurement data (keep in OneDrive / lab notebook, not in git)
+data/
+simdata/
+*.csv
+*.png
+!sim_plot_cell00_PD.png
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# local config with real VISA addresses / ports
+python/config.yaml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*

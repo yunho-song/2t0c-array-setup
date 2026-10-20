@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────────────
+#  2T0C FeFET array measurement config  (fearray_measure.py)
+# ─────────────────────────────────────────────────────────────────────
+output_dir: data
+
+arduino:
+  port: COM5            # Arduino Due programming port
+  timeout: 1.0
+
+# ── Power supplies: 2 x Keysight EDU36311A (6 rails). Board supply is separate. ──
+psu:
+  resources:
+    1: "USB0::0x2A8D::0x3302::CN00000001::INSTR"   # <- pyvisa.ResourceManager().list_resources()
+    2: "USB0::0x2A8D::0x3302::CN00000002::INSTR"
+  rails:                       # psu/ch wiring. negative:true = channel wired with "+" to GND
+    VDD:      {psu: 1, ch: 1, negative: false, current_limit: 0.50}   # CH1: 6 V max
+    WWL_ON:   {psu: 1, ch: 2, negative: false, current_limit: 0.05}
+    WWL_OFF:  {psu: 1, ch: 3, negative: true,  current_limit: 0.05}
+    WBL_OFF:  {psu: 2, ch: 1, negative: false, current_limit: 0.05}   # CH1: 6 V max
+    WBL_PROG: {psu: 2, ch: 2, negative: false, current_limit: 0.05}
+    VREAD:    {psu: 2, ch: 3, negative: false, current_limit: 0.05}
+  on_order:  [VDD, WWL_OFF, WBL_OFF, VREAD, WWL_ON, WBL_PROG]
+  off_order: [WBL_PROG, WWL_ON, VREAD, WBL_OFF, WWL_OFF, VDD]
+  ramp_steps: 3
+  settle_after_apply_s: 1.0
+  ramp_down_at_end: true
+
+# ── Base rail voltages [V] (overridable per experiment) ──
+voltages:
+  VDD: 5.0
+  WWL_ON: 3.0          # WTR gate ON  (N1 pin HIGH)
+  WWL_OFF: -2.0        # WTR gate OFF (N1 pin LOW)
+  WBL_PROG: 4.0        # program level on WBL (N2 pin HIGH)
+  WBL_OFF: 0.0         # erase / read-write level on WBL (N2 pin LOW)
+  VREAD: 1.0
+
+# ── Default scenario parameters (firmware fields) ──
+defaults:
+  set_num: 1
+  pot_num: 20          # program pulses per set
+  dep_num: 20          # erase pulses per set
+  pot_pw: 5000         # [us]
+  dep_pw: 5000         # [us]
+  pre_en: 20           # [us]
+  post_en: 20          # [us]
+  zero_t: 20           # [us]
+  read_time: 1000      # RWL pulses x 100 us  (-> I = C*V/t uses this)
+  read_set_time: 20    # [us] gate settle after WWL ON (N1ALL / N1SEL read)
+  read_delay: 20       # x 10 us
+  read_interval: 1     # read (all 25 cells) every N pulses
+  read_mode: N1OFF     # N1OFF: WTR off during read (gate floating)
+                       # N1ALL: all 5 WWL on during read (gate = WBL_OFF)
+                       # N1SEL: only selected-column WWL on during read
+  avg_count: 10        # ADC samples averaged per cell read
+  wwl_hold: 0          # 1 = keep selected WWL ON through the whole program phase (old FE mode)
+  read_wait_ms: 100    # delay before each map read
+
+# ── Experiments (run in order). Any defaults/voltages key can be overridden. ──
+experiments:
+  - name: init_map            # baseline map of all 25 cells, no pulses
+    scenario: INIT
+    rows: []
+    cols: []
+
+  - name: cell00_PD           # single cell (0,0): identical-pulse P then D, 3 sets
+    scenario: PD
+    rows: [0]
+    cols: [0]
+    set_num: 3
+
+  - name: cell22_PD_nohold
+    scenario: PD
+    rows: [2]
+    cols: [2]
+    set_num: 2
+
+  - name: row1_PD             # whole row 1 (5 cells) at once
+    scenario: PD
+    rows: [1]
+    cols: [0, 1, 2, 3, 4]
+
+  - name: diag_P              # diagonal cells, program only
+    scenario: P
+    rows: [0, 1, 2, 3, 4]     # NOTE: row/col masks select the CROSS product -> use one row or
+    cols: [0]                 #       one col per experiment for a true diagonal
+
+  - name: cell00_P_vprog      # ISPP-like: sweep WBL_PROG rail, program only
+    scenario: P
+    rows: [0]
+    cols: [0]
+    pot_num: 10
+    sweep: {key: WBL_PROG, values: [3.0, 3.5, 4.0, 4.5]}
+
+  - name: retention_map       # read the map 10 times, 60 s apart
+    scenario: R
+    r_points: 10
+    r_interval_s: 60

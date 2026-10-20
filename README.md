@@ -1,0 +1,106 @@
+# 2T0C FeFET 5×5 어레이 측정 셋업 (Rev2)
+
+저장소: https://github.com/yunho-song/2t0c-array-setup  ·  설명서: `FeArray_2T0C_manual.pptx`
+
+identical pulse로 선택 셀만 Program(P)/Erase(D) 하고, 매 read마다 **25셀 전체 맵**을 기록해
+비선택 셀의 disturb 여부를 함께 확인하는 셋업.
+
+```bash
+git clone https://github.com/yunho-song/2t0c-array-setup.git
+cd 2t0c-array-setup/python
+pip install -r requirements.txt
+cp config_example.yaml config.yaml      # 포트·VISA 주소·전압 수정 (config.yaml은 git 제외)
+python fearray_measure.py config.yaml --sim
+```
+
+```
+PSU 2대 (EDU36311A, 6 rail) ──pyvisa──┐
+                                      ├── fearray_measure.py (config.yaml) ──► data/<ts>_<name>/{data.csv, map_*.csv, plot.png, meta.json}
+Arduino Due (FeArray_2T0C_Rev2.ino) ──serial─┘
+```
+
+## 폴더
+
+| 경로 | 내용 |
+|---|---|
+| `firmware/FeArray_2T0C_Rev2/FeArray_2T0C_Rev2.ino` | 어레이 펌웨어 (Due). 4T0C 비트마스크 구조 + 2T0C_Ferro Rev1.0 핀맵/FE·FEE 펄스 |
+| `python/fearray_measure.py` | 메인 실행 스크립트 (YAML → PSU 설정 → 시나리오 실행 → 저장/플롯) |
+| `python/fearray_arduino.py` | 시리얼 프로토콜, `ScenarioParams`, 전류 역산 |
+| `python/psu_macro_2T0C.py` | 6 rail(WWL_ON/OFF, WBL_PROG/OFF, VREAD, VDD) ↔ PSU/채널 매핑, on/off 순서, 램프다운 |
+| `python/power_supply_EDU36311A.py` | EDU36311A pyvisa 드라이버 (+ `DummyPowerSupply`) |
+| `python/fearray_sim.py` | 하드웨어 없이 돌려보는 시뮬레이터 (`--sim`) |
+| `python/config_example.yaml` | 설정 예시 (포트, PSU 배선, 전압, 실험 목록) |
+
+## 설치 / 실행
+
+```bash
+pip install pyserial pyvisa pyvisa-py pyyaml numpy matplotlib
+python -c "import pyvisa; print(pyvisa.ResourceManager().list_resources())"   # PSU VISA 주소 확인 → yaml에 기입
+
+python fearray_measure.py config.yaml --sim          # 하드웨어 없이 전체 흐름 확인
+python fearray_measure.py config.yaml --no-psu       # PSU는 수동, Arduino만
+python fearray_measure.py config.yaml                # 실측
+python fearray_measure.py config.yaml --only cell00_PD
+```
+
+## 펌웨어 셀 좌표 규약 (Rev1.0 그대로, PCB와 대조 필요)
+
+| 역할 | 선택 인덱스 | 핀 |
+|---|---|---|
+| WWL (N1, WTR gate) | **col** | 51,50,49,48,47 (PC12–16) |
+| WBL 레벨 (N2, V_prog/V_off) | **row** | 39,38,37,36,35 (PC7–3) |
+| RWL | row | 25,26,27,28,29 (PD0,1,2,3,6) |
+| RBL → 적분기 → ADC | col | A0–A4 |
+
+row_mask × col_mask의 **교차곱**이 선택됨 (row [0,1] × col [0,1] = 4셀).
+단일 셀/한 row/한 col 단위로 실험을 나누는 것이 disturb 해석에 깔끔함.
+
+## 시리얼 프로토콜
+
+명령 (22 필드, `|` 종료):
+```
+SCEN,row_mask,col_mask,set_num,pot_num,dep_num,pot_pw,dep_pw,pre,post,zero,read_time,read_set_time,read_delay,read_interval,read_mode,avg,wwl_hold,read_wait_ms,r_interval_s,r_points,0|
+```
+시나리오: `P` `D` `PD` `DP` `R`(맵 반복 read) `INIT`(맵 1회) `DBGP` `DBGD` `DBGR`
+
+응답 (read 포인트당 5줄):
+```
+set,phase,pulse,row,ADC0,ADC1,ADC2,ADC3,ADC4>      phase = I | P | D | R
+EOD>
+```
+
+## 펄스 정의
+
+- **Program** (Rev1.0 FE): `N1[col] ON → pre → N2[row] ON → pot_pw → N2 OFF → zero → N1 OFF → post`
+  `wwl_hold=1`이면 program phase 동안 N1을 계속 ON (Rev1.0 FE와 동일, GI 스트레스 회피 목적)
+- **Erase** (Rev1.0 FEE): `N2 모두 OFF(WBL=V_off) → pre → N1[col] ON → dep_pw → N1 OFF → post → zero`
+- **Read** (비파괴): WTR 꺼짐(WWL_OFF) → SN 플로팅 상태에서
+  `CON LOW(RBL↔적분기 연결), CR HIGH(cap 개방) → RWL[row] HIGH read_time×100 µs (FeFET 전류 I_RBL이 cap에 적분, RBL은 op-amp 가상접지)
+  → RWL LOW, read_delay → CON HIGH(분리) → 5 col ADC 동시 샘플(avg_count 평균) → CR LOW cap 방전 3 ms → 다음 row`
+  row 0~4 반복 = 25셀 맵 1회. ADC ∝ V_cap = (1/C)∫I_RBL dt 이므로 Program 후 ↑, Erase 후 ↓.
+  `read_mode`로 read 중 WWL 상태 선택: `N1OFF` WTR OFF(기본, 논문 방식) / `N1ALL` 5 col 모두 ON(게이트=WBL_OFF) / `N1SEL` 선택 col만 ON
+
+## 전압 rail (PSU)
+
+| rail | 의미 | 아두이노 핀 상태 |
+|---|---|---|
+| WWL_ON / WWL_OFF | WTR gate | N1 HIGH / LOW |
+| WBL_PROG / WBL_OFF | WBL program / erase·read-write 레벨 | N2 HIGH / LOW |
+| VREAD | read 바이어스 | — |
+| VDD | 보드 아날로그 전원 | — |
+
+음전압 rail은 PSU 채널의 +를 GND에 묶어 만들고 yaml에서 `negative: true`로 표시 (드라이버는 |V|만 프로그램).
+CH1은 6 V 제한이므로 큰 전압은 CH2/CH3에 배정. 보드용 PSU 3호기는 이 코드에서 건드리지 않음.
+
+## 데이터
+
+`data.csv` (long): `read_idx,t_s,set,phase,pulse,row,col,selected,adc,I_uA`
+`I_uA = C·V_cap/t_int`, C=3000 pF, V_cap=adc·4/4095·3.3, t_int=read_time·100 µs (기존 GUI와 동일)
+`plot.png`: 선택 셀(색) vs 비선택 24셀(회색) 추이 + final 맵 + final−initial 맵 (빨간 테두리 = 선택 셀)
+
+## 확인/주의
+
+1. 셀 좌표 규약(WWL=col, WBL=row)을 PCB에서 확인. 다르면 `.ino` 상단 PIN 테이블만 수정.
+2. Rev1.0의 `R` 모드는 pulse_width를 초 단위로 썼음 → Rev2에서는 `R` 시나리오가 `r_interval_s`/`r_points`를 사용.
+3. 처음에는 `INIT` → `DBGR`로 맵이 정상인지 본 뒤 `P` 몇 펄스로 시작 권장.
+4. PSU rail 전압은 **실험마다 바꿀 수 있고**(`voltages:` 오버라이드) `sweep:`으로 ISPP처럼 스윕 가능.
