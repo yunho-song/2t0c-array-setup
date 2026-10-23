@@ -229,7 +229,7 @@ RAIL_HELP = {  # noqa
     "VREAD": "Read 바이어스",
 }
 DEFAULT_V = {"VDD": 5.0, "WWL_ON": 3.0, "WWL_OFF": -2.0, "WBL_PROG": 4.0, "WBL_OFF": 0.0, "VREAD": 1.0}
-SCENARIOS = ["PD", "DP", "P", "D", "R", "INIT", "DBGR", "DBGP", "DBGD"]
+SCENARIOS = ["PD", "DP", "P", "D", "R", "INIT", "DBGR", "DBGP", "DBGD", "LOOPP", "LOOPD", "LOOPR"]
 PARAM_FIELDS = [  # (key, label, default, tooltip)
     ("set_num", "Set 반복", 1, "P→D 반복 횟수 (PD/DP)"),
     ("pot_num", "P 펄스 수", 20, "set당 Program 펄스"),
@@ -774,7 +774,7 @@ class FeArrayGUI:
             vD = dict(vbase, **self._volts("D")) if split else vbase
         except Exception as e:
             messagebox.showerror(t("입력 오류"), str(e)); return
-        if p.scenario in ("P", "D", "PD", "DP", "DBGP", "DBGD") and not p.rows:
+        if p.scenario in ("P", "D", "PD", "DP", "DBGP", "DBGD", "LOOPP", "LOOPD") and not p.rows:
             messagebox.showerror(t("입력 오류"), t("셀을 선택하세요")); return
 
         name = self.name_var.get().strip() or "exp"

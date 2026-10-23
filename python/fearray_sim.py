@@ -113,5 +113,8 @@ class FeArraySim:
                 self._pulse(p, False)
         elif s == "INIT":
             pass
+        elif s.startswith("LOOP"):
+            while not self.aborted:
+                time.sleep(0.05)
         else:
             raise RuntimeError(f"Arduino: ERR,unknown scenario {s}>")

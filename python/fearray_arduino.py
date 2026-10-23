@@ -53,7 +53,7 @@ def mask(indices: Iterable[int]) -> int:
 
 @dataclass
 class ScenarioParams:
-    scenario: str = "PD"            # P D PD DP R DBGP DBGD DBGR INIT
+    scenario: str = "PD"            # P D PD DP R DBGP DBGD DBGR INIT LOOPP LOOPD LOOPR
     rows: List[int] = field(default_factory=lambda: [0])
     cols: List[int] = field(default_factory=lambda: [0])
     set_num: int = 1
@@ -168,6 +168,8 @@ class FeArrayArduino:
                 print("RX:", line)
             if line.startswith("EOD"):
                 return
+            if line.startswith("LOOP"):
+                continue
             if line.startswith("ABORT"):
                 self.aborted = True
                 continue

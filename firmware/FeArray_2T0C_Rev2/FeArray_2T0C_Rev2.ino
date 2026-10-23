@@ -23,6 +23,8 @@
  *  SERIAL COMMAND  (115200 baud, 22 comma-separated fields, terminated by '|')
  *
  *   0  scenario      P | D | PD | DP | R | DBGP | DBGD | DBGR | INIT
+ *                    LOOPP | LOOPD | LOOPR : repeat one program / erase pulse / one-row read forever (oscilloscope
+ *                    check, no serial output) until the host sends '!'. extra2 (read_wait_ms) = gap between repeats.
  *   1  row_mask      5-bit mask of selected rows (bit r = row r), 0..31
  *   2  col_mask      5-bit mask of selected cols (bit c = col c), 0..31
  *   3  set_num       number of P/D sets (PD, DP)
@@ -356,6 +358,19 @@ void loop() {
     readMap(0, 'R', 0);
   } else if (s == "INIT") {                    // all lines off, one map read
     readMap(0, 'I', 0);
+  } else if (s == "LOOPP" || s == "LOOPD" || s == "LOOPR") {   // oscilloscope test: repeat until '!'
+    uint32_t n1 = maskToPins(g.col_mask, N1_PIN);
+    uint32_t n2 = maskToPins(g.row_mask, N2_PIN);
+    int row = 0; for (int r = 0; r < 5; r++) if (g.row_mask & (1 << r)) { row = r; break; }
+    PIOC->PIO_CODR = N2_ALL;
+    if (s == "LOOPP" && g.wwl_hold) PIOC->PIO_SODR = n1;
+    Serial.println("LOOP>");
+    while (!checkAbort()) {
+      if (s == "LOOPP")      programPulse(n1, n2);
+      else if (s == "LOOPD") erasePulse(n1);
+      else                   readRow(row, adc_row);
+      if (g.read_wait_ms > 0) delay(g.read_wait_ms);
+    }
   } else {
     Serial.print("ERR,unknown scenario "); Serial.print(s); Serial.println('>');
   }
