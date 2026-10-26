@@ -131,10 +131,10 @@ DEP_PATH = {"TOP": 0, "TOPINV": 2, "BOT": 1}          # combobox label -> firmwa
 DEP_LABEL = {v: k for k, v in DEP_PATH.items()}
 
 _EN.update({
-    'TOP: WBL=WBL_OFF DC(−3), WWL 펄스  /  TOPINV: WBL 0 V 휴지, WWL 열린 동안만 WBL_OFF(−3) 펄스 (D열 WBL_PROG=0, WBL_OFF=−3)  /  BOT: 4T0C 하단 경로': 'TOP: WBL = WBL_OFF DC (-3), WWL pulse / TOPINV: WBL rests at 0 V, pulsed to WBL_OFF (-3) only while WWL is open (D column: WBL_PROG=0, WBL_OFF=-3) / BOT: 4T0C bottom path',
+    'TOP: WBL=D열 WBL_OFF(음수) DC, WWL 펄스  /  TOPINV: WBL은 D열 WBL_PROG(=0 V)에 휴지, WWL 열린 동안만 D열 WBL_OFF(음수, 값 자유) 펄스  /  BOT: 4T0C 하단 경로': 'TOP: WBL = D-column WBL_OFF (negative) DC, WWL pulse / TOPINV: WBL rests at D-column WBL_PROG (=0 V), pulsed to D-column WBL_OFF (negative, any value) only while WWL is open / BOT: 4T0C bottom path',
     'TOP=DC  TOPINV=펄스  BOT=4T0C': 'TOP=DC  TOPINV=pulsed  BOT=4T0C',
     '경고: TOPINV는 D열 WBL_PROG가 WBL 휴지 레벨 → 0 V로 두세요 (현재 {v:g} V)': 'WARNING: in TOPINV the D-column WBL_PROG is the WBL rest level -> set it to 0 V (now {v:g} V)',
-    '경고: TOPINV는 P/D 분리 전압이 필요합니다 (D열 WBL_PROG=0, WBL_OFF=−3)': 'WARNING: TOPINV needs split P/D voltages (D column: WBL_PROG=0, WBL_OFF=-3)',
+    '경고: TOPINV는 P/D 분리 전압이 필요합니다 (D열 WBL_PROG=0, WBL_OFF=음수)': 'WARNING: TOPINV needs split P/D voltages (D column: WBL_PROG=0, WBL_OFF negative)',
     '경고: D phase의 WBL_OFF가 0 V 이상 → depression 전압이 걸리지 않음. \'P/D phase에 다른 전압\' 체크 후 D열 WBL_OFF에 음수 입력': 'WARNING: WBL_OFF in D phase is >= 0 V -> no depression voltage. Tick split voltages and enter a negative WBL_OFF in the D column',
     'D 경로': 'D path', 'TOP=2T0C  BOT=4T0C': 'TOP=2T0C  BOT=4T0C', 'TOP(2T0C): WWL 펄스, 게이트=WBL_OFF → D phase에 WBL_OFF=−3 (P/D 분리 전압)  /  BOT: 4T0C용 하단 경로': 'TOP (2T0C): WWL pulse, gate=WBL_OFF -> set WBL_OFF=-3 in D phase (split voltages) / BOT: 4T0C bottom path', 'Rest 레벨 (N2 LOW). TOP 경로 erase 레벨 겸함': 'rest level (N2 LOW); also TOP-path erase level', 'Depression 레벨 (UD on, 하단 경로, 음수)': 'depression level (UD on, bottom path, negative)', '하단 경로 off 레벨 (0 V)': 'bottom path off level (0 V)',
     '  셀별 그래프 (5×5)  ': '  Per-cell plots (5x5)  ', 'Y축 공통 (셀 간 비교)': 'shared Y axis', '주황 = 선택 셀, 제목 = (row,col) 마지막 ADC': 'orange = selected cell, title = (row,col) last ADC',
@@ -373,7 +373,7 @@ class FeArrayGUI:
         self.dep_var = tk.StringVar(value="TOP")
         cb_dep = ttk.Combobox(f, textvariable=self.dep_var, values=list(DEP_PATH), width=7, state="readonly")
         cb_dep.grid(row=r, column=1, sticky="w")
-        cb_dep.bind("<Enter>", lambda _e: self._status(t("TOP: WBL=WBL_OFF DC(−3), WWL 펄스  /  TOPINV: WBL 0 V 휴지, WWL 열린 동안만 WBL_OFF(−3) 펄스 (D열 WBL_PROG=0, WBL_OFF=−3)  /  BOT: 4T0C 하단 경로")))
+        cb_dep.bind("<Enter>", lambda _e: self._status(t("TOP: WBL=D열 WBL_OFF(음수) DC, WWL 펄스  /  TOPINV: WBL은 D열 WBL_PROG(=0 V)에 휴지, WWL 열린 동안만 D열 WBL_OFF(음수, 값 자유) 펄스  /  BOT: 4T0C 하단 경로")))
         ttk.Label(f, text=t("TOP=DC  TOPINV=펄스  BOT=4T0C"), foreground="gray").grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
 
         ttk.Label(f, text=t("저장 폴더")).grid(row=r + 1, column=0, sticky="w")
@@ -904,7 +904,7 @@ class FeArrayGUI:
                 self._logln(t("경고: D phase의 WBL_OFF가 0 V 이상 → depression 전압이 걸리지 않음. 'P/D phase에 다른 전압' 체크 후 D열 WBL_OFF에 음수 입력"))
             if p.dep_path == 2:
                 if not use_cols:
-                    self._logln(t("경고: TOPINV는 P/D 분리 전압이 필요합니다 (D열 WBL_PROG=0, WBL_OFF=−3)"))
+                    self._logln(t("경고: TOPINV는 P/D 분리 전압이 필요합니다 (D열 WBL_PROG=0, WBL_OFF=음수)"))
                 elif abs(vD.get("WBL_PROG", 0.0)) > 1e-6:
                     self._logln(t("경고: TOPINV는 D열 WBL_PROG가 WBL 휴지 레벨 → 0 V로 두세요 (현재 {v:g} V)").format(v=vD["WBL_PROG"]))
         name = self.name_var.get().strip() or "exp"
