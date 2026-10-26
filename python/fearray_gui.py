@@ -603,16 +603,47 @@ class FeArrayGUI:
             self.port_var.set(ports[0])
 
     def _refresh_visa(self):
+        """List VISA resources as 'ALIAS  (USB0::...)' when NI-VISA has an alias (NI MAX name)."""
+        self.visa_map = {}            # display label -> resource string / alias to open
+        labels = []
         try:
             import pyvisa
-            res = list(pyvisa.ResourceManager().list_resources())
+            rm = pyvisa.ResourceManager()
+            try:
+                infos = rm.list_resources_info()          # {name: ResourceInfo(alias=...)}
+            except Exception:
+                infos = {n: None for n in rm.list_resources()}
+            for name, info in infos.items():
+                alias = getattr(info, "alias", None) if info is not None else None
+                if not alias:
+                    try:
+                        alias = rm.resource_info(name).alias
+                    except Exception:
+                        alias = None
+                is_psu = "0x2A8D" in name.upper() or "EDU363" in name.upper() or (alias and "POWER" in alias.upper())
+                label = f"{alias}  ({name})" if alias else name
+                self.visa_map[label] = alias or name
+                labels.append((0 if is_psu else 1, label))
+            labels = [l for _, l in sorted(labels)]
         except Exception as e:
-            res = []
             self._logln(t("VISA 목록 실패: {e}").format(e=e))
         for pid in (1, 2):
-            getattr(self, f"psu_cb{pid}")["values"] = res
-        if len(res) >= 2 and not self.psu_vars[1].get():
-            self.psu_vars[1].set(res[0]); self.psu_vars[2].set(res[1])
+            getattr(self, f"psu_cb{pid}")["values"] = labels
+        # auto-pick by alias POWER_SUPPLY_1 / POWER_SUPPLY_2, else first two PSU entries
+        for pid in (1, 2):
+            if self.psu_vars[pid].get():
+                continue
+            pick = next((l for l in labels if l.upper().startswith(f"POWER_SUPPLY_{pid} ")), None)
+            if pick is None:
+                psu_labels = [l for l in labels if "0x2A8D" in l.upper()]
+                pick = psu_labels[pid - 1] if len(psu_labels) >= pid else None
+            if pick:
+                self.psu_vars[pid].set(pick)
+
+    def _visa_resource(self, pid: int) -> str:
+        """Resource string (or NI alias) to open for PSU pid, from the combobox text."""
+        text = self.psu_vars[pid].get().strip()
+        return getattr(self, "visa_map", {}).get(text, text.split("  (")[0] if "  (" in text else text)
 
     def _sim_toggled(self):
         pass
@@ -672,7 +703,7 @@ class FeArrayGUI:
         return out
 
     def _psu_cfg(self):
-        return {"resources": {1: self.psu_vars[1].get(), 2: self.psu_vars[2].get()}, "rails": DEFAULT_RAILS}
+        return {"resources": {1: self._visa_resource(1), 2: self._visa_resource(2)}, "rails": DEFAULT_RAILS}
 
     def _apply_v(self, phase):
         if self.psu is None:
