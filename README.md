@@ -1,6 +1,6 @@
 # 2T0C FeFET 5×5 어레이 측정 셋업 (Rev2)
 
-저장소: https://github.com/yunho-song/2t0c-array-setup  ·  설명서: `FeArray_2T0C_manual.pptx`
+저장소: https://github.com/yunho-song/2t0c-array-setup  ·  설명서: `FeArray_2T0C_manual.pptx`  ·  오실로스코프 검증: `SCOPE_CHECK.md`
 
 identical pulse로 선택 셀만 Program(P)/Erase(D) 하고, 매 read마다 **25셀 전체 맵**을 기록해
 비선택 셀의 disturb 여부를 함께 확인하는 셋업.
@@ -63,7 +63,15 @@ row_mask × col_mask의 **교차곱**이 선택됨 (row [0,1] × col [0,1] = 4�
 ```
 SCEN,row_mask,col_mask,set_num,pot_num,dep_num,pot_pw,dep_pw,pre,post,zero,read_time,read_set_time,read_delay,read_interval,read_mode,avg,wwl_hold,read_wait_ms,r_interval_s,r_points,0|
 ```
-시나리오: `P` `D` `PD` `DP` `R`(맵 반복 read) `INIT`(맵 1회) `DBGP` `DBGD` `DBGR`
+| 시나리오 | 동작 | 용도 |
+|---|---|---|
+| `INIT` | 라인 OFF 후 맵 1회 | 기준 맵 |
+| `P` / `D` | 초기 맵 → program/erase 펄스 N회, read_interval마다 맵 | P 또는 D 응답 |
+| `PD` / `DP` | 초기 맵 → (P→D) 또는 (D→P) × set_num | identical pulse P/D + disturb |
+| `PD` + `phase_voltages` | Python이 set마다 PSU를 P용/D용으로 바꿈 (WBL_OFF 0 V / −3 V) | 권장 운용 |
+| `R` | 맵을 r_points회, r_interval_s 간격 반복 | retention |
+| `DBGR` / `DBGP` / `DBGD` | 맵 1회 / 펄스만 | 수동 확인 |
+| `LOOPP` / `LOOPD` / `LOOPR` | 펄스 1회·row read를 `!`까지 무한 반복 | 오실로스코프 |
 실행 중 호스트가 `!` 1바이트를 보내면 현재 read/펄스 루프를 빠져나와 `ABORT>` `EOD>`로 끝남 (GUI 중지 버튼)
 
 응답 (read 포인트당 5줄):
@@ -123,7 +131,7 @@ Python이 set마다 P rail 적용 → 펌웨어 `P` 실행 → D rail 적용 →
 |---|---|---|
 | WWL_ON / WWL_OFF | WTR gate | N1 HIGH / LOW |
 | WBL_PROG / WBL_OFF | WBL program / erase·read-write 레벨 | N2 HIGH / LOW |
-| VREAD | read 바이어스 | — |
+| VREAD | RWL read 바이어스 — 반전 적분기라 가상접지(VINP)보다 **낮아야** ADC가 올라감 → 음수(반전 배선) | — |
 | VDD | 보드 아날로그 전원 | — |
 
 음전압 rail은 PSU 채널의 +를 GND에 묶어 만들고 yaml에서 `negative: true`로 표시 (드라이버는 |V|만 프로그램).

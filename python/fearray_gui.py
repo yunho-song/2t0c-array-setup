@@ -134,7 +134,7 @@ _EN.update({
     'WTR gate OFF (N1 LOW, 음수)': 'WTR gate OFF (N1 LOW, negative)',
     'Program 레벨 (N2 HIGH)': 'Program level (N2 HIGH)',
     'Erase / read-write 레벨 (N2 LOW)': 'Erase / read-write level (N2 LOW)',
-    'Read 바이어스': 'Read bias',
+    'Read 바이어스 (RWL, 가상접지보다 낮게 → 음수)': 'Read bias (RWL, below virtual ground -> negative)',
     'Set 반복': 'Sets',
     'P→D 반복 횟수 (PD/DP)': 'P->D repeat count (PD/DP)',
     'P 펄스 수': 'P pulses',
@@ -228,9 +228,9 @@ RAIL_HELP = {  # noqa
     "WWL_OFF": "WTR gate OFF (N1 LOW, 음수)",
     "WBL_PROG": "Program 레벨 (N2 HIGH)",
     "WBL_OFF": "Erase / read-write 레벨 (N2 LOW)",
-    "VREAD": "Read 바이어스",
+    "VREAD": "Read 바이어스 (RWL, 가상접지보다 낮게 → 음수)",
 }
-DEFAULT_V = {"VDD": 5.0, "WWL_ON": 3.0, "WWL_OFF": -2.0, "WBL_PROG": 4.0, "WBL_OFF": 0.0, "VREAD": 1.0}
+DEFAULT_V = {"VDD": 5.0, "WWL_ON": 3.0, "WWL_OFF": -2.0, "WBL_PROG": 4.0, "WBL_OFF": 0.0, "VREAD": -1.0}
 SCENARIOS = ["PD", "DP", "P", "D", "R", "INIT", "DBGR", "DBGP", "DBGD", "LOOPP", "LOOPD", "LOOPR"]
 PARAM_FIELDS = [  # (key, label, default, tooltip)
     ("set_num", "Set 반복", 1, "P→D 반복 횟수 (PD/DP)"),

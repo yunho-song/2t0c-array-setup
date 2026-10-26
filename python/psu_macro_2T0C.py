@@ -9,7 +9,7 @@ Rail names (see firmware header):
     WWL_OFF   N1 pin LOW   -> WTR gate off  (e.g. -2 V, wired as negative rail)
     WBL_PROG  N2 pin HIGH  -> program voltage on WBL
     WBL_OFF   N2 pin LOW   -> erase / read-write level on WBL (often 0 V)
-    VREAD     RWL / read drain bias
+    VREAD     RWL read bias (below integrator virtual ground -> negative, rail wired inverted)
     VDD       analog front-end (integrator / level shifter) supply
 
 YAML example (psu section):
@@ -20,7 +20,7 @@ YAML example (psu section):
       rails:                         # name: {psu, ch, negative, current_limit}
         WWL_ON:   {psu: 1, ch: 2, negative: false, current_limit: 0.05}
         WWL_OFF:  {psu: 1, ch: 3, negative: true,  current_limit: 0.05}
-        VREAD:    {psu: 2, ch: 1, negative: false, current_limit: 0.05}
+        VREAD:    {psu: 2, ch: 1, negative: true,  current_limit: 0.05}
         WBL_PROG: {psu: 2, ch: 2, negative: false, current_limit: 0.05}
         WBL_OFF:  {psu: 2, ch: 3, negative: true,  current_limit: 0.05}
         VDD:      {psu: 1, ch: 1, negative: false, current_limit: 0.50}
@@ -33,7 +33,7 @@ YAML example (psu section):
       WWL_OFF: -2.0
       WBL_PROG: 4.0
       WBL_OFF: 0.0
-      VREAD: 1.0
+      VREAD: -1.0
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ DEFAULT_RAILS = {
     "VDD":      {"psu": 1, "ch": 1, "negative": False, "current_limit": 0.5},
     "WWL_ON":   {"psu": 1, "ch": 2, "negative": False, "current_limit": 0.05},
     "WWL_OFF":  {"psu": 1, "ch": 3, "negative": True,  "current_limit": 0.05},
-    "VREAD":    {"psu": 2, "ch": 1, "negative": False, "current_limit": 0.05},
+    "VREAD":    {"psu": 2, "ch": 1, "negative": True,  "current_limit": 0.05},
     "WBL_PROG": {"psu": 2, "ch": 2, "negative": False, "current_limit": 0.05},
     "WBL_OFF":  {"psu": 2, "ch": 3, "negative": True,  "current_limit": 0.05},
 }

@@ -16,7 +16,7 @@ psu:
     VDD:      {psu: 1, ch: 1, negative: false, current_limit: 0.50}   # CH1: 6 V max
     WWL_ON:   {psu: 1, ch: 2, negative: false, current_limit: 0.05}
     WWL_OFF:  {psu: 1, ch: 3, negative: true,  current_limit: 0.05}
-    VREAD:    {psu: 2, ch: 1, negative: false, current_limit: 0.05}   # CH1: 6 V max
+    VREAD:    {psu: 2, ch: 1, negative: true,  current_limit: 0.05}   # CH1: 6 V max. read bias below virtual ground -> wired inverted
     WBL_PROG: {psu: 2, ch: 2, negative: false, current_limit: 0.05}
     WBL_OFF:  {psu: 2, ch: 3, negative: true,  current_limit: 0.05}   # erase level: 0 or negative -> wired inverted
   on_order:  [VDD, WWL_OFF, WBL_OFF, VREAD, WWL_ON, WBL_PROG]
@@ -32,7 +32,7 @@ voltages:
   WWL_OFF: -2.0        # WTR gate OFF (N1 pin LOW)
   WBL_PROG: 4.0        # program level on WBL (N2 pin HIGH)
   WBL_OFF: 0.0         # erase / read-write level on WBL (N2 pin LOW). 0 or negative (rail wired inverted)
-  VREAD: 1.0
+  VREAD: -1.0        # RWL read bias; must be BELOW the integrator virtual-ground (VINP) -> negative (rail wired inverted)
 
 # ── Default scenario parameters (firmware fields) ──
 defaults:
