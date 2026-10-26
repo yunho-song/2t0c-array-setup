@@ -68,8 +68,8 @@ SCEN,row_mask,col_mask,set_num,pot_num,dep_num,pot_pw,dep_pw,pre,post,zero,read_
 | `INIT` | 라인 OFF 후 맵 1회 | 기준 맵 |
 | `P` / `D` | 초기 맵 → program/erase 펄스 N회, read_interval마다 맵 | P 또는 D 응답 |
 | `PD` / `DP` | 초기 맵 → (P→D) 또는 (D→P) × set_num | identical pulse P/D + disturb |
-| `PD` + `phase_voltages` | Python이 set마다 PSU를 P용/D용으로 바꿈 (WBL_OFF 0 V / −3 V) | D 경로 TOP일 때 필요 |
-| `dep_path` 1 (BOT) | erase = UD 선택 + UDEN(S2) 펄스로 WBL_DEP(−V) 인가. 하단 경로, program과 대칭 | 권장 (보드의 depression 경로) |
+| `PD` + `phase_voltages` | Python이 set마다 PSU를 P용/D용으로 바꿈 (WBL_OFF 0 V / −3 V) | 2T0C 권장 운용 (depression 전압은 WBL_OFF로) |
+| `dep_path` 1 (BOT) | UD 선택 + UDEN(S2) 펄스 (하단 경로) | 4T0C 셀 전용, 2T0C 미사용 |
 | `R` | 맵을 r_points회, r_interval_s 간격 반복 | retention |
 | `DBGR` / `DBGP` / `DBGD` | 맵 1회 / 펄스만 | 수동 확인 |
 | `LOOPP` / `LOOPD` / `LOOPR` | 펄스 1회·row read를 `!`까지 무한 반복 | 오실로스코프 |

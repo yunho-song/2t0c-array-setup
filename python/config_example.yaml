@@ -21,10 +21,9 @@ psu:
     VDD:      {psu: 3, ch: 1, negative: false, current_limit: 0.50}   # board +supply
     VSS:      {psu: 3, ch: 2, negative: true,  current_limit: 0.50}   # board -supply
     WWL_ON:   {psu: 3, ch: 3, negative: false, current_limit: 0.05}   # N1 on
-    WBL_DEP:  {psu: 2, ch: 2, negative: true,  current_limit: 0.05}   # UD on  : depression -V (bottom path, dep_path=1)
-    BLBTM_OFF:{psu: 1, ch: 2, negative: false, current_limit: 0.05}   # UD off : 0 V
-  on_order:  [VDD, VSS, WWL_OFF, WBL_OFF, BLBTM_OFF, VREAD, WWL_ON, WBL_PROG, WBL_DEP]
-  off_order: [WBL_DEP, WBL_PROG, WWL_ON, VREAD, BLBTM_OFF, WBL_OFF, WWL_OFF, VSS, VDD]
+    # (4T0C only, dep_path=1)  WBL_DEP: {psu: 2, ch: 2, negative: true}   BLBTM_OFF: {psu: 1, ch: 2, negative: false}
+  on_order:  [VDD, VSS, WWL_OFF, WBL_OFF, VREAD, WWL_ON, WBL_PROG]
+  off_order: [WBL_PROG, WWL_ON, VREAD, WBL_OFF, WWL_OFF, VSS, VDD]
   ramp_steps: 3
   settle_after_apply_s: 1.0
   ramp_down_at_end: true
@@ -36,9 +35,7 @@ voltages:
   WWL_ON: 3.0          # WTR gate ON  (N1 pin HIGH)
   WWL_OFF: -2.0        # WTR gate OFF (N1 pin LOW)
   WBL_PROG: 4.0        # program level on WBL (N2 pin HIGH)
-  WBL_OFF: 0.0         # rest level on WBL (N2 LOW). dep_path=0: also the erase level (use phase_voltages)
-  WBL_DEP: -3.0        # depression level, bottom path (dep_path=1)
-  BLBTM_OFF: 0.0       # bottom path off level
+  WBL_OFF: 0.0         # rest level on WBL (N2 LOW); the erase level in D phase -> set per phase (phase_voltages)
   VREAD: -1.0        # RWL read bias; must be BELOW the integrator virtual-ground (VINP) -> negative (rail wired inverted)
 
 # ── Default scenario parameters (firmware fields) ──
@@ -62,7 +59,7 @@ defaults:
   wwl_hold: 0          # 1 = keep selected WWL ON through the whole program phase (old FE mode)
   read_wait_ms: 100    # delay before each map read
   phase_gap_ms: 0      # PD/DP (firmware-only mode): wait between P phase and D phase [ms]
-  dep_path: 1          # 0 = TOP (erase = WWL pulse, WBL at WBL_OFF)   1 = BOT (UD/UDEN path with WBL_DEP) — board's depression path
+  dep_path: 0          # 0 = TOP (2T0C: erase = WWL pulse, gate -> WBL_OFF; use phase_voltages)   1 = BOT (4T0C bottom path only)
 
 # ── Experiments (run in order). Any defaults/voltages key can be overridden. ──
 experiments:
