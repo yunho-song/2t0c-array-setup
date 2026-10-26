@@ -128,6 +128,8 @@ def setup_fonts(root) -> bool:
 
 
 _EN.update({
+    '  셀별 그래프 (5×5)  ': '  Per-cell plots (5x5)  ', 'Y축 공통 (셀 간 비교)': 'shared Y axis', '주황 = 선택 셀, 제목 = (row,col) 마지막 ADC': 'orange = selected cell, title = (row,col) last ADC',
+    '보기': 'View', '한 그래프 (선택=색, 비선택=회색)': 'one plot (selected=color, others=gray)', '선택 셀만': 'selected cells only', 'row별 5개 그래프': '5 plots (per row)', '5×5 격자 (셀마다)': '5x5 grid (per cell)', '맵 표시': 'show map',
     '보드 아날로그 전원': 'board analog supply',
     'WTR gate OFF (N1 LOW, 음수)': 'WTR gate OFF (N1 LOW, negative)',
     'Program 레벨 (N2 HIGH)': 'Program level (N2 HIGH)',
@@ -447,21 +449,54 @@ class FeArrayGUI:
         from matplotlib.figure import Figure
         self.nb = ttk.Notebook(parent)
         self.nb.grid(row=0, column=0, sticky="nsew")
-        tab1 = ttk.Frame(self.nb); tab2 = ttk.Frame(self.nb)
+        tab1 = ttk.Frame(self.nb); tab3 = ttk.Frame(self.nb); tab2 = ttk.Frame(self.nb)
         self.nb.add(tab1, text=t("  실시간 데이터  "))
+        self.nb.add(tab3, text=t("  셀별 그래프 (5×5)  "))
         self.nb.add(tab2, text=t("  파형 미리보기 (현재 파라미터)  "))
 
         # ── live data ──
+        bar = ttk.Frame(tab1)
+        bar.pack(fill="x")
+        ttk.Label(bar, text=t("보기")).pack(side="left", padx=(6, 4))
+        self.view_var = tk.StringVar(value="overlay")
+        self.VIEW_MODES = [("overlay", t("한 그래프 (선택=색, 비선택=회색)")),
+                           ("selected", t("선택 셀만")),
+                           ("rows", t("row별 5개 그래프")),
+                           ("grid", t("5×5 격자 (셀마다)"))]
+        self.view_cb = ttk.Combobox(bar, state="readonly", width=30,
+                                    values=[lab for _, lab in self.VIEW_MODES])
+        self.view_cb.current(0)
+        self.view_cb.pack(side="left")
+        self.view_cb.bind("<<ComboboxSelected>>", lambda _e: self._redraw(force=True))
+        self.map_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text=t("맵 표시"), variable=self.map_var,
+                        command=lambda: self._redraw(force=True)).pack(side="left", padx=8)
         self.fig = Figure(figsize=(7.5, 5.0))
-        gs = self.fig.add_gridspec(1, 2, width_ratios=[2.2, 1], wspace=0.3, left=0.1, right=0.97, top=0.92, bottom=0.12)
-        self.ax = self.fig.add_subplot(gs[0, 0])
-        self.ax_map = self.fig.add_subplot(gs[0, 1])
-        self.ax.set_xlabel("read index"); self.ax.set_ylabel("ADC [counts]"); self.ax.grid(alpha=0.3)
-        self.ax_map.set_title("current map (ADC)")
-        self.im = None
+        self.ax = None; self.ax_map = None; self.axes_cells = None
+        self._layout_axes()
         self.canvas = FigureCanvasTkAgg(self.fig, master=tab1)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.canvas.draw()
+
+        # ── per-cell 5x5 grid ──
+        bar = ttk.Frame(tab3); bar.pack(fill="x")
+        self.grid_sharey = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text=t("Y축 공통 (셀 간 비교)"), variable=self.grid_sharey,
+                        command=self._redraw_grid).pack(side="left", padx=6)
+        ttk.Label(bar, text=t("주황 = 선택 셀, 제목 = (row,col) 마지막 ADC"), foreground="gray").pack(side="left", padx=10)
+        self.gfig = Figure(figsize=(7.5, 5.0))
+        self.gaxes = []
+        gsg = self.gfig.add_gridspec(5, 5, wspace=0.1, hspace=0.35, left=0.06, right=0.98, top=0.95, bottom=0.07)
+        for r in range(5):
+            for c in range(5):
+                ax = self.gfig.add_subplot(gsg[r, c])
+                ax.tick_params(labelsize=6, labelbottom=(r == 4), labelleft=(c == 0))
+                ax.grid(alpha=0.25)
+                ax.set_title(f"({r},{c})", fontsize=7, pad=2)
+                self.gaxes.append(ax)
+        self.gcanvas = FigureCanvasTkAgg(self.gfig, master=tab3)
+        self.gcanvas.get_tk_widget().pack(fill="both", expand=True)
+        self.gcanvas.draw()
 
         # ── waveform preview ──
         self.wfig = Figure(figsize=(7.5, 5.0))
@@ -812,8 +847,8 @@ class FeArrayGUI:
         self.writer = ExperimentWriter(self.out_var.get(), name, p, self.psu.rails if self.psu else {},
                                        {"base": vbase, "P": vP, "D": vD} if split else vbase)
         self.maps = []
-        self.ax.clear(); self.ax.grid(alpha=0.3); self.ax.set_xlabel("read index"); self.ax.set_ylabel("ADC [counts]")
-        self.ax.set_title(f"{p.scenario}  rows {p.rows} × cols {p.cols}")
+        self._layout_axes()
+        self.fig.suptitle(f"{p.scenario}  rows {p.rows} × cols {p.cols}", fontsize=9)
         self.canvas.draw_idle()
         ri = max(1, p.read_interval)
         self.n_expected = (1 + p.set_num * (p.pot_num // ri + p.dep_num // ri)) if split else p.expected_reads()
@@ -894,33 +929,140 @@ class FeArrayGUI:
             self._redraw()
         self.root.after(200, self._poll)
 
-    def _redraw(self):
+    def _view_mode(self) -> str:
+        i = self.view_cb.current()
+        return self.VIEW_MODES[i][0] if i >= 0 else "overlay"
+
+    def _layout_axes(self):
+        """(Re)build subplot layout for the current view mode."""
+        self.fig.clear()
+        mode = self._view_mode()
+        show_map = self.map_var.get()
+        ncols = 2 if show_map else 1
+        wr = [2.2, 1] if show_map else [1]
+        if mode in ("overlay", "selected"):
+            gs = self.fig.add_gridspec(1, ncols, width_ratios=wr, wspace=0.3, left=0.1, right=0.97, top=0.92, bottom=0.12)
+            self.ax = self.fig.add_subplot(gs[0, 0]); self.axes_cells = None
+            self.ax.set_xlabel("read index"); self.ax.set_ylabel("ADC [counts]"); self.ax.grid(alpha=0.3)
+            self.ax_map = self.fig.add_subplot(gs[0, 1]) if show_map else None
+        elif mode == "rows":
+            gs = self.fig.add_gridspec(5, ncols, width_ratios=wr, wspace=0.3, hspace=0.12, left=0.1, right=0.97, top=0.95, bottom=0.08)
+            self.axes_cells = [self.fig.add_subplot(gs[r, 0]) for r in range(5)]
+            for r, ax in enumerate(self.axes_cells):
+                ax.set_ylabel(f"row {r}", fontsize=8); ax.grid(alpha=0.3); ax.tick_params(labelsize=7)
+                if r < 4: ax.tick_params(labelbottom=False)
+            self.axes_cells[-1].set_xlabel("read index")
+            self.ax = None
+            self.ax_map = self.fig.add_subplot(gs[1:4, 1]) if show_map else None
+        else:  # grid 5x5
+            if show_map:
+                outer = self.fig.add_gridspec(1, 2, width_ratios=[2.6, 1], wspace=0.25, left=0.07, right=0.97, top=0.94, bottom=0.08)
+                inner = outer[0, 0].subgridspec(5, 5, wspace=0.08, hspace=0.12)
+                self.ax_map = self.fig.add_subplot(outer[0, 1])
+            else:
+                inner = self.fig.add_gridspec(5, 5, wspace=0.08, hspace=0.12, left=0.07, right=0.97, top=0.94, bottom=0.08)
+                self.ax_map = None
+            self.axes_cells = []
+            for r in range(5):
+                for c in range(5):
+                    ax = self.fig.add_subplot(inner[r, c])
+                    ax.tick_params(labelsize=6, labelbottom=(r == 4), labelleft=(c == 0))
+                    ax.grid(alpha=0.25)
+                    self.axes_cells.append(ax)
+            self.ax = None
+        if self.ax_map is not None:
+            self.ax_map.set_title("current map (ADC)")
+
+    def _redraw(self, force: bool = False):
+        import numpy as np
+        import matplotlib.patches as mp
+        if force:
+            self._layout_axes()
+        full = [m for m in self.maps if all(r[0] is not None for r in m)]
+        if not full:
+            self.canvas.draw_idle()
+            return
+        arr = np.array(full, dtype=float)           # n x 5 x 5
+        x = np.arange(len(arr))
+        mode = self._view_mode()
+        colors = {}
+        if mode in ("overlay", "selected"):
+            self.ax.clear(); self.ax.grid(alpha=0.3)
+            self.ax.set_xlabel("read index"); self.ax.set_ylabel("ADC [counts]")
+            for r in range(5):
+                for c in range(5):
+                    if (r, c) in self.sel_cells:
+                        ln, = self.ax.plot(x, arr[:, r, c], "o-", ms=3, lw=1.4, label=f"({r},{c})")
+                        colors[(r, c)] = ln.get_color()
+                    elif mode == "overlay":
+                        self.ax.plot(x, arr[:, r, c], "-", color="0.65", lw=0.8)
+            if self.sel_cells:
+                self.ax.legend(fontsize=7, loc="best", ncol=2 if len(self.sel_cells) > 6 else 1)
+        elif mode == "rows":
+            ymin, ymax = np.nanmin(arr), np.nanmax(arr)
+            pad = max(1.0, (ymax - ymin) * 0.1)
+            for r, ax in enumerate(self.axes_cells):
+                ax.clear(); ax.grid(alpha=0.3); ax.set_ylabel(f"row {r}", fontsize=8); ax.tick_params(labelsize=7)
+                for c in range(5):
+                    sel = (r, c) in self.sel_cells
+                    ax.plot(x, arr[:, r, c], "o-" if sel else "-", ms=3, lw=1.4 if sel else 0.8,
+                            alpha=1.0 if sel else 0.45, label=f"col {c}")
+                ax.set_ylim(ymin - pad, ymax + pad)
+                if r < 4: ax.tick_params(labelbottom=False)
+            self.axes_cells[0].legend(fontsize=6, loc="upper right", ncol=5)
+            self.axes_cells[-1].set_xlabel("read index")
+        else:  # grid
+            ymin, ymax = np.nanmin(arr), np.nanmax(arr)
+            pad = max(1.0, (ymax - ymin) * 0.1)
+            for i, ax in enumerate(self.axes_cells):
+                r, c = divmod(i, 5)
+                sel = (r, c) in self.sel_cells
+                ax.clear(); ax.grid(alpha=0.25)
+                ax.plot(x, arr[:, r, c], "o-" if sel else "-", ms=2.5, lw=1.3 if sel else 0.9,
+                        color="#E8912D" if sel else "#0F6E8C")
+                ax.set_ylim(ymin - pad, ymax + pad)
+                ax.set_title(f"({r},{c})  {arr[-1, r, c]:.0f}", fontsize=7, pad=2,
+                             color="#C8553D" if sel else "#333", fontweight="bold" if sel else "normal")
+                ax.tick_params(labelsize=6, labelbottom=(r == 4), labelleft=(c == 0))
+                if sel:
+                    for sp in ax.spines.values():
+                        sp.set_edgecolor("#E8912D"); sp.set_linewidth(1.5)
+        if self.ax_map is not None:
+            self.ax_map.clear()
+            self.ax_map.imshow(arr[-1], cmap="viridis")
+            for r in range(5):
+                for c in range(5):
+                    self.ax_map.text(c, r, f"{arr[-1, r, c]:.0f}", ha="center", va="center", fontsize=7, color="w")
+                    if (r, c) in self.sel_cells:
+                        self.ax_map.add_patch(mp.Rectangle((c - 0.5, r - 0.5), 1, 1, fill=False, ec="red", lw=2))
+            self.ax_map.set_title(f"map #{len(arr)}"); self.ax_map.set_xticks(range(5)); self.ax_map.set_yticks(range(5))
+        self.canvas.draw_idle()
+        self._redraw_grid()
+
+    def _redraw_grid(self):
         import numpy as np
         full = [m for m in self.maps if all(r[0] is not None for r in m)]
         if not full:
             return
-        arr = np.array(full, dtype=float)           # n x 5 x 5
+        arr = np.array(full, dtype=float)
         x = np.arange(len(arr))
-        self.ax.clear(); self.ax.grid(alpha=0.3)
-        self.ax.set_xlabel("read index"); self.ax.set_ylabel("ADC [counts]")
-        for r in range(5):
-            for c in range(5):
-                if (r, c) in self.sel_cells:
-                    self.ax.plot(x, arr[:, r, c], "o-", ms=3, lw=1.4, label=f"({r},{c})")
-                else:
-                    self.ax.plot(x, arr[:, r, c], "-", color="0.65", lw=0.8)
-        if self.sel_cells:
-            self.ax.legend(fontsize=7, loc="best")
-        self.ax_map.clear()
-        im = self.ax_map.imshow(arr[-1], cmap="viridis")
-        for r in range(5):
-            for c in range(5):
-                self.ax_map.text(c, r, f"{arr[-1, r, c]:.0f}", ha="center", va="center", fontsize=7, color="w")
-                if (r, c) in self.sel_cells:
-                    import matplotlib.patches as mp
-                    self.ax_map.add_patch(mp.Rectangle((c - 0.5, r - 0.5), 1, 1, fill=False, ec="red", lw=2))
-        self.ax_map.set_title(f"map #{len(arr)}"); self.ax_map.set_xticks(range(5)); self.ax_map.set_yticks(range(5))
-        self.canvas.draw_idle()
+        if self.grid_sharey.get():
+            ymin, ymax = np.nanmin(arr), np.nanmax(arr)
+            pad = max(1.0, (ymax - ymin) * 0.1)
+        for i, ax in enumerate(self.gaxes):
+            r, c = divmod(i, 5)
+            sel = (r, c) in self.sel_cells
+            ax.clear(); ax.grid(alpha=0.25)
+            ax.plot(x, arr[:, r, c], "o-" if sel else "-", ms=2.5, lw=1.3 if sel else 0.9,
+                    color="#E8912D" if sel else "#0F6E8C")
+            if self.grid_sharey.get():
+                ax.set_ylim(ymin - pad, ymax + pad)
+            ax.set_title(f"({r},{c})  {arr[-1, r, c]:.0f}", fontsize=7, pad=2,
+                         color="#C8553D" if sel else "#333", fontweight="bold" if sel else "normal")
+            ax.tick_params(labelsize=6, labelbottom=(r == 4), labelleft=(c == 0))
+            for sp in ax.spines.values():
+                sp.set_edgecolor("#E8912D" if sel else "#888"); sp.set_linewidth(1.5 if sel else 0.6)
+        self.gcanvas.draw_idle()
 
     # ── YAML in/out ──
     def _to_yaml_dict(self) -> Dict:
