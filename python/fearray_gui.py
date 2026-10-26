@@ -783,6 +783,7 @@ class FeArrayGUI:
         return out
 
     def _psu_cfg(self):
+        # model per PSU is auto-detected from *IDN? (EDU36311A / 2230G); the rail map is the same for both
         return {"resources": {pid: self._visa_resource(pid) for pid in PSU_IDS}, "rails": DEFAULT_RAILS}
 
     def _apply_v(self, phase):
@@ -841,7 +842,7 @@ class FeArrayGUI:
                 self.psu = PowerSupplyMacro2T0C(rm, self._psu_cfg(), dummy=sim)
                 self.psu.connect()
                 for pid, idn in sorted(self.psu.idn.items()):
-                    self._logln(f"PSU{pid} = {self.psu.resources.get(pid, '?')} : {idn}")
+                    self._logln(f"PSU{pid} [{self.psu.model.get(pid, '?')}] = {self.psu.resources.get(pid, '?')} : {idn}")
                 self._logln("rails: " + ", ".join(f"{n}→PSU{r['psu']}CH{r['ch']}{'(−)' if r['negative'] else ''}" for n, r in self.psu.rails.items()))
         except Exception as e:
             self.ard = None; self.psu = None

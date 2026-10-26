@@ -14,7 +14,7 @@ python fearray_measure.py config.yaml --sim
 ```
 
 ```
-PSU 2대 (EDU36311A, 6 rail) ──pyvisa──┐
+PSU 2~3대 (EDU36311A 또는 2230G, 자동 인식) ──pyvisa──┐
                                       ├── fearray_measure.py (config.yaml) ──► data/<ts>_<name>/{data.csv, map_*.csv, plot.png, meta.json}
 Arduino Due (FeArray_2T0C_Rev2.ino) ──serial─┘
 ```
@@ -28,7 +28,8 @@ Arduino Due (FeArray_2T0C_Rev2.ino) ──serial─┘
 | `python/fearray_measure.py` | 배치 실행 스크립트 (YAML → PSU 설정 → 실험 목록 순차 실행 → 저장/플롯) |
 | `python/fearray_arduino.py` | 시리얼 프로토콜, `ScenarioParams`, 전류 역산 |
 | `python/psu_macro_2T0C.py` | 6 rail(WWL_ON/OFF, WBL_PROG/OFF, VREAD, VDD) ↔ PSU/채널 매핑, on/off 순서, 램프다운 |
-| `python/power_supply_EDU36311A.py` | EDU36311A pyvisa 드라이버 (+ `DummyPowerSupply`) |
+| `python/power_supply_EDU36311A.py` | Keysight EDU36311A pyvisa 드라이버 (+ `DummyPowerSupply`) |
+| `python/power_supply_2230G.py` | Keithley 2230G pyvisa 드라이버 (같은 인터페이스). `*IDN?`으로 자동 선택되므로 두 기종을 섞어 써도 됨 |
 | `python/fearray_sim.py` | 하드웨어 없이 돌려보는 시뮬레이터 (`--sim`) |
 | `python/config_example.yaml` | 설정 예시 (포트, PSU 배선, 전압, 실험 목록) |
 

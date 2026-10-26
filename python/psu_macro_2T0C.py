@@ -1,8 +1,9 @@
 """
 psu_macro_2T0C.py
 ─────────────────
-Rail-level control of the 2T0C FeFET array bias using two EDU36311A supplies
-(6 channels).  A third supply for board power is NOT touched here.
+Rail-level control of the 2T0C FeFET array bias using 2-3 triple-output supplies.
+Supported instruments: Keysight EDU36311A and Keithley 2230G (auto-detected from *IDN?;
+force with psu.models: {1: "2230G"}).  Any mix of the two is fine, rails just name psu/ch.
 
 Rail names (see firmware header):
     WWL_ON    N1 pin HIGH  -> WTR gate on   (e.g. +3 V)
@@ -43,6 +44,32 @@ import time
 from typing import Dict, Iterable, List, Mapping
 
 from power_supply_EDU36311A import PowerSupplyEDU36311A, DummyPowerSupply
+from power_supply_2230G import PowerSupply2230G, DummyPowerSupply2230G
+
+# Supported instruments. psu.models in yaml / GUI may force one per PSU id; default "auto" = *IDN? detection.
+MODEL_CLASSES = {
+    "EDU36311A": (PowerSupplyEDU36311A, DummyPowerSupply),
+    "2230G":     (PowerSupply2230G, DummyPowerSupply2230G),
+}
+
+
+def detect_model(rm, resource: str, timeout: int = 3000) -> str:
+    """Open the VISA resource, read *IDN?, close it, and return the MODEL_CLASSES key."""
+    dev = rm.open_resource(resource)
+    try:
+        dev.timeout = timeout
+        dev.write_termination = "\n"; dev.read_termination = "\n"
+        idn = dev.query("*IDN?").strip()
+    finally:
+        dev.close()
+    return model_from_idn(idn)
+
+
+def model_from_idn(idn: str) -> str:
+    u = idn.upper()
+    if "2230" in u or "KEITHLEY" in u:
+        return "2230G"
+    return "EDU36311A"
 
 # Wiring as found on the bench (2026-10-26): 3 x EDU36311A (NI MAX aliases POWER_SUPPLY_1/2/3)
 DEFAULT_RAILS = {
@@ -65,6 +92,8 @@ class PowerSupplyMacro2T0C:
                  settle_delay: float = 0.1, final_settle: float = 0.3):
         self.rm = resource_manager
         self.resources: Dict[int, str] = {int(k): v for k, v in psu_cfg.get("resources", {}).items()}
+        self.models: Dict[int, str] = {int(k): str(v) for k, v in psu_cfg.get("models", {}).items()}  # "auto" | "EDU36311A" | "2230G"
+        self.model: Dict[int, str] = {}        # resolved per PSU id after connect()
         self.rails: Dict[str, dict] = dict(DEFAULT_RAILS)
         self.rails.update(psu_cfg.get("rails", {}))
         self.on_order: List[str] = list(psu_cfg.get("on_order", DEFAULT_ON_ORDER))
@@ -92,11 +121,15 @@ class PowerSupplyMacro2T0C:
         ids = sorted({int(r["psu"]) for r in self.rails.values()})
         for pid in ids:
             res = self.resources.get(pid, f"PSU{pid}")
-            cls = DummyPowerSupply if self.dummy else PowerSupplyEDU36311A
+            model = self.models.get(pid, "auto")
+            if model not in MODEL_CLASSES:
+                model = "EDU36311A" if self.dummy else detect_model(self.rm, res)
+            cls = MODEL_CLASSES[model][1 if self.dummy else 0]
             p = cls(self.rm, res, settle_delay=settle_delay_for_driver(self.settle_delay))
             idn = p.connect()
             self.idn[pid] = idn
-            print(f"PSU{pid}: {idn}")
+            self.model[pid] = model
+            print(f"PSU{pid} [{model}]: {idn}")
             self.psu[pid] = p
         # all channels to 0 V, current limits, outputs ON (at 0 V)
         for name, r in self.rails.items():
