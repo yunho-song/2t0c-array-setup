@@ -866,9 +866,15 @@ class FeArrayGUI:
         try:
             p = self._params()
             vbase = self._volts("base")
-            split = self.split_var.get() and p.scenario in ("PD", "DP")
-            vP = dict(vbase, **self._volts("P")) if split else vbase
-            vD = dict(vbase, **self._volts("D")) if split else vbase
+            use_cols = self.split_var.get()
+            split = use_cols and p.scenario in ("PD", "DP")          # per-phase switching inside one run
+            vP = dict(vbase, **self._volts("P")) if use_cols else vbase
+            vD = dict(vbase, **self._volts("D")) if use_cols else vbase
+            # single-phase scenarios take the matching column directly
+            if p.scenario in ("P", "DBGP", "LOOPP"):
+                vbase = vP
+            elif p.scenario in ("D", "DBGD", "LOOPD"):
+                vbase = vD
         except Exception as e:
             messagebox.showerror(t("입력 오류"), str(e)); return
         if p.scenario in ("P", "D", "PD", "DP", "DBGP", "DBGD", "LOOPP", "LOOPD") and not p.rows:
@@ -899,7 +905,12 @@ class FeArrayGUI:
         def rails(v):
             if self.psu is not None:
                 self.psu.apply(v); time.sleep(0.5)
-                self.q.put(("log", f"PSU {v}"))
+                self.q.put(("log", f"PSU set {v}"))
+                try:
+                    rb = self.psu.readback()
+                    self.q.put(("log", "PSU meas " + ", ".join(f"{k}={val:.2f}V" for k, (val, _i) in rb.items())))
+                except Exception as e:
+                    self.q.put(("log", f"PSU readback failed: {e}"))
         try:
             if split:
                 order = ["P", "D"] if p.scenario == "PD" else ["D", "P"]
