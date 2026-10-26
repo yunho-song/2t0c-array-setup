@@ -62,7 +62,7 @@ DEFAULT_OFF_ORDER = list(reversed(DEFAULT_ON_ORDER))
 
 class PowerSupplyMacro2T0C:
     def __init__(self, resource_manager, psu_cfg: Mapping, dummy: bool = False,
-                 settle_delay: float = 0.5):
+                 settle_delay: float = 0.1, final_settle: float = 0.3):
         self.rm = resource_manager
         self.resources: Dict[int, str] = {int(k): v for k, v in psu_cfg.get("resources", {}).items()}
         self.rails: Dict[str, dict] = dict(DEFAULT_RAILS)
@@ -71,7 +71,8 @@ class PowerSupplyMacro2T0C:
         self.off_order: List[str] = list(psu_cfg.get("off_order", DEFAULT_OFF_ORDER))
         self.ramp_steps: int = int(psu_cfg.get("ramp_steps", 3))
         self.dummy = dummy
-        self.settle_delay = settle_delay
+        self.settle_delay = settle_delay      # after each rail write
+        self.final_settle = final_settle      # once after a batch of changes (apply)
         self.psu: Dict[int, PowerSupplyEDU36311A] = {}
         self.idn: Dict[int, str] = {}
         self.current: Dict[str, float] = {}
@@ -92,7 +93,7 @@ class PowerSupplyMacro2T0C:
         for pid in ids:
             res = self.resources.get(pid, f"PSU{pid}")
             cls = DummyPowerSupply if self.dummy else PowerSupplyEDU36311A
-            p = cls(self.rm, res)
+            p = cls(self.rm, res, settle_delay=settle_delay_for_driver(self.settle_delay))
             idn = p.connect()
             self.idn[pid] = idn
             print(f"PSU{pid}: {idn}")
@@ -130,16 +131,32 @@ class PowerSupplyMacro2T0C:
         p.set_voltages({int(r["ch"]): mag}, verify=verify)
         self.current[name] = volts
 
-    def apply(self, voltages: Mapping[str, float], verify: bool = True) -> None:
-        """Program all rails in on_order (rails absent from `voltages` are left as they are)."""
+    def changed(self, voltages: Mapping[str, float], tol: float = 1e-6) -> List[str]:
+        """Rails whose requested value differs from what is currently programmed."""
+        return [n for n, v in voltages.items() if abs(self.current.get(n, float("nan")) - float(v)) > tol
+                or n not in self.current]
+
+    def apply(self, voltages: Mapping[str, float], verify: bool = True, only_changed: bool = True) -> List[str]:
+        """Program rails in on_order (rails absent from `voltages` are left as they are).
+        only_changed=True skips rails already at the requested value, so a P<->D switch that
+        changes two rails takes ~0.5 s instead of re-writing all seven.  Returns the rails written."""
         order = [n for n in self.on_order if n in voltages] + \
                 [n for n in voltages if n not in self.on_order]
         for name in order:
             if name not in self.rails:
                 raise KeyError(f"unknown rail '{name}' (known: {list(self.rails)})")
+        todo = set(self.changed(voltages)) if only_changed else set(order)
+        written = []
+        for name in order:
+            if name not in todo:
+                continue
             self._apply_rail(name, float(voltages[name]), verify=verify)
             time.sleep(self.settle_delay)
-        print("PSU rails:", {k: self.current[k] for k in order})
+            written.append(name)
+        if written:
+            time.sleep(self.final_settle)
+        print("PSU rails:", {k: self.current[k] for k in order}, "written:", written)
+        return written
 
     def set_rail(self, name: str, volts: float) -> None:
         self._apply_rail(name, volts)
@@ -156,9 +173,16 @@ class PowerSupplyMacro2T0C:
                 time.sleep(0.2)
         print("PSU rails ramped to 0 V")
 
-    def readback(self) -> Dict[str, tuple]:
+    def readback(self, names: Iterable[str] = None) -> Dict[str, tuple]:
+        """Measured (V, I) per rail (sign restored for negative rails). `names` limits the query."""
         out = {}
-        for name, r in self.rails.items():
+        for name in (list(names) if names is not None else list(self.rails)):
+            r = self.rails[name]
             v, i = self.psu[int(r["psu"])].measure(int(r["ch"]))
             out[name] = (-v if r["negative"] else v, i)
         return out
+
+
+def settle_delay_for_driver(macro_delay: float) -> float:
+    """Driver-level wait after a VOLT write (the macro adds its own settle_delay on top)."""
+    return max(0.05, min(0.3, macro_delay))

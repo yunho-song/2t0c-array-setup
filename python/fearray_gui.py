@@ -935,19 +935,21 @@ class FeArrayGUI:
             if self.psu is None:
                 return
             v = dict(v)
+            written = []
             if p.dep_path == 2 and phase in ("P", "D"):
                 # TOPINV: change the WBL rail that N2 is NOT selecting, flip N2, then the other one,
                 # so WBL stays at 0 V while the supplies ramp (otherwise WBL sits at +WBL_PROG / -WBL_OFF for seconds)
-                if phase == "D":          # coming from N2 LOW (WBL = WBL_OFF)
-                    if "WBL_PROG" in v: self.psu.set_rail("WBL_PROG", float(v.pop("WBL_PROG")))
-                    n2("N2HI")            # WBL -> WBL_PROG rail (0 V)
-                else:                     # coming from N2 HIGH (WBL = WBL_PROG)
-                    if "WBL_OFF" in v: self.psu.set_rail("WBL_OFF", float(v.pop("WBL_OFF")))
-                    n2("N2LO")            # WBL -> WBL_OFF rail (0 V)
-            self.psu.apply(v); time.sleep(0.5)
-            self.q.put(("log", f"PSU set {v}"))
+                first = "WBL_PROG" if phase == "D" else "WBL_OFF"   # D: coming from N2 LOW / P: from N2 HIGH
+                if first in v:
+                    written += self.psu.apply({first: float(v.pop(first))})
+                n2("N2HI" if phase == "D" else "N2LO")              # WBL -> the 0 V rail
+            written += self.psu.apply(v)           # only rails whose value changed are re-written
+            if not written:
+                self.q.put(("log", f"PSU unchanged {v}"))
+                return
+            self.q.put(("log", f"PSU set {v}  (written: {written})"))
             try:
-                rb = self.psu.readback()
+                rb = self.psu.readback(written)
                 self.q.put(("log", "PSU meas " + ", ".join(f"{k}={val:.2f}V" for k, (val, _i) in rb.items())))
             except Exception as e:
                 self.q.put(("log", f"PSU readback failed: {e}"))
