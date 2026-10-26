@@ -20,6 +20,7 @@
 |---|---|---|---|
 | LOOPP | 51(N1), 39(N2) | N1 High 5040 µs. N2는 N1보다 20 µs 늦게 올라가 5000 µs 유지, N1보다 20 µs 먼저 내려감 | pre/zero = 20 µs 오프셋, P폭 값 변경 시 폭 추종 |
 | LOOPD (D 경로 = TOP) | 51(N1), 39(N2) | N1 5000 µs 단일 펄스, N2 계속 Low. 보드 UP0는 WBL_OFF 고정 → 변화 없음(정상) | depression 전압은 UP0에 '펄스'가 아니라 WBL_OFF 레벨로 나타남 |
+| LOOPD (D 경로 = TOPINV) | 51(N1), 39(N2) | N2는 평소 **High**(WBL = D열 WBL_PROG = 0 V). N1이 올라간 뒤 20 µs 후 N2가 **Low로 떨어져** dep_pw 유지(WBL = WBL_OFF = −3 V), 다시 High, 20 µs 뒤 N1 Low. program 펄스의 거울상 | 보드 UP0: 0 V 휴지, 펄스 동안만 −3 V. 선택 안 된 row의 UP은 계속 0 V |
 | (참고) D 경로 = BOT | 46(UDEN0), 34(UD0) | 4T0C 셀 전용 하단 경로. 2T0C에서는 사용하지 않음 (UP0/UD0를 한 WBL 패드에 묶을 수 없음) | — |
 | LOOPP, 셀 (1,2) | 49(N1, col 2), 38(N2, row 1) | 선택 셀에 따라 핀이 바뀜: col c → 핀 51−c, row r → 핀 39−r | 핀 테이블(.ino 상단) 검증 |
 | LOOPR | 25(RWL row0), 31(CK), 53(CON), 52(CR) | CON Low·CR High 약 100 ms 구간 / RWL은 DFF 입력이라 100 µs 주기 짧은 펄스 ×1000, CK 매번 토글 / 끝에 CON High → CR Low 3 ms | read_time 바꾸면 구간 길이 변경(1000→100 ms) |
@@ -49,6 +50,7 @@ PSU "제어 사용" 켜고 전압은 안전값으로: VDD 5, WWL_ON +1, WWL_OFF 
 ## 알아 두어야 할 것
 
 - 2T0C는 상단 경로만 사용: UPEN0 = WWL(게이트), UP0 = WBL(드레인). Erase(D) = WWL 펄스로 게이트를 WBL_OFF에 연결하는 것이므로 **WBL(UP0)에는 펄스가 없고** WBL_OFF 레벨이 DC로 나타남. depression 전압은 D phase에서 WBL_OFF = −3 V로 두어 만든다(`phase_voltages`, read는 `N1OFF`). 스코프: LOOPD에서 UPEN0 펄스 + UP0는 WBL_OFF 레벨 고정이면 정상.
+- **D 경로 = TOPINV (펄스형 WBL, 권장)**: TOP과 달리 D phase 내내 WBL에 −3 V DC가 걸리지 않는다. N2를 평소 High로 두어 WBL = WBL_PROG rail(D열에서 0 V)에 쉬게 하고, WWL이 열린 dep_pw 동안만 N2 Low → WBL_OFF(−3 V). D열 전압: WBL_PROG 0, WBL_OFF −3, WWL_ON 0(음전압 통과에는 Vgs = 0−(−3) = 3 V면 충분 → 게이트 스트레스가 P 펄스와 같음), WWL_OFF −4(WBL_OFF보다 1 V 이상 낮게, 비선택 WTR 차단). 'P/D phase에 다른 전압' 체크 필수 — 펌웨어 PD 단독 모드에서는 rail이 안 바뀌므로 TOPINV가 성립하지 않는다.
 - UD/UDEN(하단 경로, dep_path=1)은 4T0C 셀용. 2T0C에서 UP0와 UD0를 같은 패드에 묶으면 두 mux 출력이 충돌하므로 쓰지 않는다.
 - RWL(VREAD)은 반전 적분기 때문에 가상접지(VINP)보다 **낮아야** ADC가 양으로 올라감. VINP가 0 V가 아닐 수 있으니 보드 설정 확인.
 - 음전압 rail(WWL_OFF, WBL_OFF, VREAD)은 PSU 채널 + 단자를 GND에 묶어 만들고 yaml `negative: true`. 코드는 |V|만 설정하고 극성 불일치는 에러로 막음.

@@ -75,7 +75,9 @@ class ScenarioParams:
     r_interval_s: float = 0.0       # R scenario
     r_points: int = 1               # R scenario
     phase_gap_ms: int = 0           # PD/DP: wait between P and D phase [ms]
-    dep_path: int = 0               # 0 = TOP (WWL pulse, WBL at WBL_OFF)  1 = BOT (UD/UDEN path, WBL_DEP rail)
+    dep_path: int = 0               # 0 = TOP (WWL pulse, WBL at WBL_OFF DC)  1 = BOT (4T0C UD/UDEN path)
+                                    # 2 = TOPINV (WBL pulsed: N2 rests HIGH = WBL_PROG rail (0 V in D phase),
+                                    #     pulsed LOW = WBL_OFF (-V) only while WWL is open; needs split voltages)
 
     def to_command(self) -> str:
         f = [self.scenario, mask(self.rows), mask(self.cols),

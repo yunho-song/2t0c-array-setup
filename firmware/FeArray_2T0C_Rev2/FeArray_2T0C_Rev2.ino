@@ -49,6 +49,12 @@
  *  22  extra6        dep_path : 0 = TOP (erase = WWL pulse with WBL at WBL_OFF, Rev1.0 FEE)
  *                               1 = BOT (erase = UD select ON (BLBTM = WBL_DEP, negative) + UDEN(S2) pulse,
  *                                        symmetric to program; board's dedicated depression path)
+ *                               2 = TOPINV (2T0C, pulsed WBL): N2 is held HIGH as the rest state during the
+ *                                        whole D scenario (WBL = WBL_PROG rail, set to 0 V in D phase) and
+ *                                        pulsed LOW only while WWL is open (WBL = WBL_OFF rail = -V).
+ *                                        N1 ON -> pre -> N2 LOW -> dep_pw -> N2 HIGH -> zero -> N1 OFF -> post
+ *                                        Requires the host to switch rails between P and D (split voltages):
+ *                                        D phase WBL_PROG = 0, WBL_OFF = -V.  Unselected rows stay at 0 V.
  *  23  extra7        (reserved)
  *
  *  Example:  PD,1,1,3,10,10,5000,5000,20,20,20,1000,1,20,1,N1OFF,10,0,100,0,0,0|
@@ -185,6 +191,24 @@ void erasePulse(uint32_t n1) {
   udelay(g.zero_t);
 }
 
+// Erase, pulsed-WBL variant (dep_path=2, TOPINV): N2 rest = HIGH (WBL = WBL_PROG rail = 0 V in D phase),
+//   selected rows' N2 pulsed LOW (WBL = WBL_OFF = -V) only while WWL is open.  Mirror image of programPulse.
+//   N1 ON -> pre -> N2(sel) LOW -> dep_pw -> N2(sel) HIGH -> zero -> N1 OFF -> post
+uint32_t g_n2_rest = 0;                 // N2 bits held HIGH between pulses / during reads (0 or N2_ALL)
+void n2Rest() { PIOC->PIO_CODR = N2_ALL; PIOC->PIO_SODR = g_n2_rest; }
+
+void erasePulseInv(uint32_t n1, uint32_t n2) {
+  n2Rest();
+  PIOC->PIO_SODR = n1;
+  udelay(g.pre_en);
+  PIOC->PIO_CODR = n2;       // WBL -> WBL_OFF (negative) on selected rows only
+  udelay(g.dep_pw);
+  PIOC->PIO_SODR = n2;       // back to WBL_PROG rail (0 V)
+  udelay(g.zero_t);          // SN returns to 0 V through WTR
+  PIOC->PIO_CODR = n1;
+  udelay(g.post_en);
+}
+
 // Erase via bottom path (dep_path=1): UD select ON (BLBTM = WBL_DEP, negative) -> pre -> UDEN(S2) ON -> pw
 //   -> UDEN OFF -> zero -> UD OFF -> post.  Top path stays off (N1 OFF, N2 LOW).
 void erasePulseBot(uint32_t ud, uint32_t uden) {
@@ -242,7 +266,7 @@ void readMap(int set, char phase, int pulse) {
 
   if (g.read_wait_ms > 0) delay(g.read_wait_ms);
 
-  PIOC->PIO_CODR = N2_ALL;                 // WBL = V_off everywhere
+  n2Rest();                                // WBL = rest level everywhere (V_off, or V_prog rail in TOPINV D phase)
   FB_CLR(); HLCHOP_CLR();
   bool held = g.wwl_hold && (phase == 'P');  // caller already holds selected N1
   if (n1_read) {
@@ -270,7 +294,8 @@ void readMap(int set, char phase, int pulse) {
 void runProgramPhase(int set) {
   uint32_t n1 = maskToPins(g.col_mask, N1_PIN);
   uint32_t n2 = maskToPins(g.row_mask, N2_PIN);
-  PIOC->PIO_CODR = N2_ALL;
+  g_n2_rest = 0;                           // program phase: rest = N2 LOW (WBL = WBL_OFF)
+  n2Rest();
   if (g.wwl_hold) {                        // old FE mode: hold selected WWL ON
     PIOC->PIO_SODR = n1;
     udelay(g.read_set_time);
@@ -287,8 +312,13 @@ void runErasePhase(int set) {
   uint32_t n1 = maskToPins(g.col_mask, N1_PIN);
   uint32_t ud = maskToPins(g.row_mask, UD_PIN);
   uint32_t uden = maskToPins(g.col_mask, UDEN_PIN);
+  uint32_t n2 = maskToPins(g.row_mask, N2_PIN);
+  g_n2_rest = (g.dep_path == 2) ? N2_ALL : 0;   // TOPINV: WBL rests on the WBL_PROG rail (0 V)
+  n2Rest();
   for (int k = 0; k < g.dep_num && !checkAbort(); k++) {
-    if (g.dep_path == 1) erasePulseBot(ud, uden); else erasePulse(n1);
+    if (g.dep_path == 1)      erasePulseBot(ud, uden);
+    else if (g.dep_path == 2) erasePulseInv(n1, n2);
+    else                      erasePulse(n1);
     if (g.read_interval > 0 && ((k + 1) % g.read_interval == 0))
       readMap(set, 'D', k + 1);
   }
@@ -334,7 +364,7 @@ bool parseSerial(Params &p) {
   p.wwl_hold     = (int)p.extra[1] ? 1 : 0;
   p.read_wait_ms = (int)p.extra[2];
   p.phase_gap_ms = (int)p.extra[5];
-  p.dep_path     = (int)p.extra[6] ? 1 : 0;
+  p.dep_path     = (int)p.extra[6]; if (p.dep_path < 0 || p.dep_path > 2) p.dep_path = 0;
   if (p.read_mode != "N1ALL" && p.read_mode != "N1SEL") p.read_mode = "N1OFF";
   return true;
 }
@@ -360,6 +390,9 @@ void loop() {
   allLinesOff();
   FB_CLR(); HLCHOP_CLR();
   const String &s = g.scenario;
+  // TOPINV: a D-type scenario rests with N2 HIGH from the very first read (WBL = WBL_PROG rail = 0 V)
+  g_n2_rest = (g.dep_path == 2 && (s == "D" || s == "DP" || s == "DBGD" || s == "LOOPD")) ? N2_ALL : 0;
+  n2Rest();
 
   if (s == "P") {
     readMap(0, 'I', 0);
@@ -394,12 +427,16 @@ void loop() {
     uint32_t ud = maskToPins(g.row_mask, UD_PIN);
     uint32_t uden = maskToPins(g.col_mask, UDEN_PIN);
     int row = 0; for (int r = 0; r < 5; r++) if (g.row_mask & (1 << r)) { row = r; break; }
-    PIOC->PIO_CODR = N2_ALL;
+    n2Rest();
     if (s == "LOOPP" && g.wwl_hold) PIOC->PIO_SODR = n1;
     Serial.println("LOOP>");
     while (!checkAbort()) {
       if (s == "LOOPP")      programPulse(n1, n2);
-      else if (s == "LOOPD") { if (g.dep_path == 1) erasePulseBot(ud, uden); else erasePulse(n1); }
+      else if (s == "LOOPD") {
+        if (g.dep_path == 1)      erasePulseBot(ud, uden);
+        else if (g.dep_path == 2) erasePulseInv(n1, n2);
+        else                      erasePulse(n1);
+      }
       else                   readRow(row, adc_row);
       if (g.read_wait_ms > 0) delay(g.read_wait_ms);
     }
@@ -408,6 +445,7 @@ void loop() {
   }
 
   allLinesOff();
+  if (g_n2_rest) PIOC->PIO_SODR = N2_ALL;   // TOPINV: keep WBL on the 0 V rail until the host changes rails
   if (g_abort) Serial.println("ABORT>");
   delay(50);
   Serial.println("EOD>");

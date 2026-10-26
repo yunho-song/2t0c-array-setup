@@ -59,7 +59,10 @@ defaults:
   wwl_hold: 0          # 1 = keep selected WWL ON through the whole program phase (old FE mode)
   read_wait_ms: 100    # delay before each map read
   phase_gap_ms: 0      # PD/DP (firmware-only mode): wait between P phase and D phase [ms]
-  dep_path: 0          # 0 = TOP (2T0C: erase = WWL pulse, gate -> WBL_OFF; use phase_voltages)   1 = BOT (4T0C bottom path only)
+  dep_path: 0          # 0 = TOP    (2T0C: WWL pulse, WBL sits at WBL_OFF DC for the whole D phase; use phase_voltages)
+                       # 2 = TOPINV (2T0C: WBL rests at 0 V = D-phase WBL_PROG rail, pulsed to WBL_OFF only while WWL is open.
+                       #             Needs phase_voltages D: {WBL_PROG: 0.0, WBL_OFF: -3.0}. Less stress / disturb than TOP)
+                       # 1 = BOT    (4T0C bottom path only)
 
 # ── Experiments (run in order). Any defaults/voltages key can be overridden. ──
 experiments:
@@ -83,6 +86,16 @@ experiments:
       P: {WBL_PROG: 4.0, WBL_OFF: 0.0, WWL_ON: 3.0}
       D: {WBL_OFF: -3.0, WWL_ON: 4.0}
     phase_gap_s: 1.0            # phase 전환 후 추가 대기 (PSU settle 이후)
+
+  - name: cell00_PD_pulsedWBL   # TOPINV: WBL은 0 V에서 쉬고 WWL이 열린 동안만 -3 V 펄스 (WTR 게이트 스트레스 = P 펄스 수준)
+    scenario: PD
+    rows: [0]
+    cols: [0]
+    set_num: 2
+    dep_path: 2
+    phase_voltages:
+      P: {WBL_PROG: 4.0, WBL_OFF: 0.0, WWL_ON: 3.0, WWL_OFF: -2.0}
+      D: {WBL_PROG: 0.0, WBL_OFF: -3.0, WWL_ON: 0.0, WWL_OFF: -4.0}   # WWL_ON 0 V면 충분 (Vgs = 0-(-3) = 3 V), WWL_OFF <= WBL_OFF-1
 
   - name: cell22_PD_nohold
     scenario: PD

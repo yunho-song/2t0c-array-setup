@@ -127,7 +127,14 @@ def setup_fonts(root) -> bool:
     return _UI_KO
 
 
+DEP_PATH = {"TOP": 0, "TOPINV": 2, "BOT": 1}          # combobox label -> firmware dep_path
+DEP_LABEL = {v: k for k, v in DEP_PATH.items()}
+
 _EN.update({
+    'TOP: WBL=WBL_OFF DC(−3), WWL 펄스  /  TOPINV: WBL 0 V 휴지, WWL 열린 동안만 WBL_OFF(−3) 펄스 (D열 WBL_PROG=0, WBL_OFF=−3)  /  BOT: 4T0C 하단 경로': 'TOP: WBL = WBL_OFF DC (-3), WWL pulse / TOPINV: WBL rests at 0 V, pulsed to WBL_OFF (-3) only while WWL is open (D column: WBL_PROG=0, WBL_OFF=-3) / BOT: 4T0C bottom path',
+    'TOP=DC  TOPINV=펄스  BOT=4T0C': 'TOP=DC  TOPINV=pulsed  BOT=4T0C',
+    '경고: TOPINV는 D열 WBL_PROG가 WBL 휴지 레벨 → 0 V로 두세요 (현재 {v:g} V)': 'WARNING: in TOPINV the D-column WBL_PROG is the WBL rest level -> set it to 0 V (now {v:g} V)',
+    '경고: TOPINV는 P/D 분리 전압이 필요합니다 (D열 WBL_PROG=0, WBL_OFF=−3)': 'WARNING: TOPINV needs split P/D voltages (D column: WBL_PROG=0, WBL_OFF=-3)',
     '경고: D phase의 WBL_OFF가 0 V 이상 → depression 전압이 걸리지 않음. \'P/D phase에 다른 전압\' 체크 후 D열 WBL_OFF에 음수 입력': 'WARNING: WBL_OFF in D phase is >= 0 V -> no depression voltage. Tick split voltages and enter a negative WBL_OFF in the D column',
     'D 경로': 'D path', 'TOP=2T0C  BOT=4T0C': 'TOP=2T0C  BOT=4T0C', 'TOP(2T0C): WWL 펄스, 게이트=WBL_OFF → D phase에 WBL_OFF=−3 (P/D 분리 전압)  /  BOT: 4T0C용 하단 경로': 'TOP (2T0C): WWL pulse, gate=WBL_OFF -> set WBL_OFF=-3 in D phase (split voltages) / BOT: 4T0C bottom path', 'Rest 레벨 (N2 LOW). TOP 경로 erase 레벨 겸함': 'rest level (N2 LOW); also TOP-path erase level', 'Depression 레벨 (UD on, 하단 경로, 음수)': 'depression level (UD on, bottom path, negative)', '하단 경로 off 레벨 (0 V)': 'bottom path off level (0 V)',
     '  셀별 그래프 (5×5)  ': '  Per-cell plots (5x5)  ', 'Y축 공통 (셀 간 비교)': 'shared Y axis', '주황 = 선택 셀, 제목 = (row,col) 마지막 ADC': 'orange = selected cell, title = (row,col) last ADC',
@@ -364,10 +371,10 @@ class FeArrayGUI:
         r += 1
         ttk.Label(f, text=t("D 경로")).grid(row=r, column=0, sticky="w")
         self.dep_var = tk.StringVar(value="TOP")
-        cb_dep = ttk.Combobox(f, textvariable=self.dep_var, values=["TOP", "BOT"], width=7, state="readonly")
+        cb_dep = ttk.Combobox(f, textvariable=self.dep_var, values=list(DEP_PATH), width=7, state="readonly")
         cb_dep.grid(row=r, column=1, sticky="w")
-        cb_dep.bind("<Enter>", lambda _e: self._status(t("TOP(2T0C): WWL 펄스, 게이트=WBL_OFF → D phase에 WBL_OFF=−3 (P/D 분리 전압)  /  BOT: 4T0C용 하단 경로")))
-        ttk.Label(f, text=t("TOP=2T0C  BOT=4T0C"), foreground="gray").grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
+        cb_dep.bind("<Enter>", lambda _e: self._status(t("TOP: WBL=WBL_OFF DC(−3), WWL 펄스  /  TOPINV: WBL 0 V 휴지, WWL 열린 동안만 WBL_OFF(−3) 펄스 (D열 WBL_PROG=0, WBL_OFF=−3)  /  BOT: 4T0C 하단 경로")))
+        ttk.Label(f, text=t("TOP=DC  TOPINV=펄스  BOT=4T0C"), foreground="gray").grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
 
         ttk.Label(f, text=t("저장 폴더")).grid(row=r + 1, column=0, sticky="w")
         self.out_var = tk.StringVar(value=os.path.join(HERE, "data"))
@@ -610,6 +617,17 @@ class FeArrayGUI:
             MAP_D = (f"UD = BLBTM select (pin 34…): LOW→BLBTM_OFF / HIGH→WBL_DEP (4T0C bottom path, rails not in this GUI)     "
                      f"UDEN = S2 gate (pin 46…): WWL_OFF→WWL_ON     top path N1/N2 stay off")
             axes[1].text(0.0, -0.04, MAP_D, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
+        elif self.dep_var.get() == "TOPINV":
+            wl = [W(pre), W(dpw), W(zero), W(post)]
+            labs = [(gap, "N2 HIGH\n(rest)"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['zero_t']}\n= {zero:g}"), (wl[3], f"{L['post_en']}\n= {post:g}"), (gap, "")]
+            n1 = [(gap, 0), (wl[0], 1), (wl[1], 1), (wl[2], 1), (wl[3], 0), (gap, 0)]
+            n2 = [(gap, 1), (wl[0], 1), (wl[1], 0), (wl[2], 1), (wl[3], 1), (gap, 1)]
+            sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.6), (wl[3], 0.6), (gap, 0.6)]
+            vD = self._volts("D") if self.split_var.get() else {}
+            draw(axes[1], f"ERASE pulse ×1  (dep_path=TOPINV)   N2 rests HIGH → WBL = WBL_PROG(D) {vD.get('WBL_PROG', v['WBL_PROG']):g} V;  "
+                          f"N2 LOW only inside the N1 pulse → WBL = WBL_OFF(D) {vD.get('WBL_OFF', v['WBL_OFF']):g} V",
+                 ["N2", "N1", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
+            axes[1].text(0.0, -0.04, MAP_W, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         else:
             wl = [W(pre), W(dpw), W(post), W(zero)]
             labs = [(gap, "N2 OFF"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['post_en']}\n= {post:g}"), (wl[3], f"{L['zero_t']}\n= {zero:g}"), (gap, "")]
@@ -857,7 +875,7 @@ class FeArrayGUI:
             kw[key] = float(s) if key == "r_interval_s" else int(float(s))
         return ScenarioParams(scenario=self.scen_var.get(), rows=rows, cols=cols,
                               read_mode=self.rmode_var.get(), wwl_hold=int(self.hold_var.get()),
-                              dep_path=1 if self.dep_var.get() == "BOT" else 0, **kw)
+                              dep_path=DEP_PATH.get(self.dep_var.get(), 0), **kw)
 
     # ── run ──
     def _start(self):
@@ -880,10 +898,15 @@ class FeArrayGUI:
         if p.scenario in ("P", "D", "PD", "DP", "DBGP", "DBGD", "LOOPP", "LOOPD") and not p.rows:
             messagebox.showerror(t("입력 오류"), t("셀을 선택하세요")); return
 
-        if p.scenario in ("D", "PD", "DP") and p.dep_path == 0:
-            d_off = (self._volts("D") if split else {}).get("WBL_OFF", vbase.get("WBL_OFF", 0.0))
+        if p.scenario in ("D", "PD", "DP", "DBGD", "LOOPD") and p.dep_path in (0, 2):
+            d_off = vD.get("WBL_OFF", 0.0)
             if d_off >= 0:
                 self._logln(t("경고: D phase의 WBL_OFF가 0 V 이상 → depression 전압이 걸리지 않음. 'P/D phase에 다른 전압' 체크 후 D열 WBL_OFF에 음수 입력"))
+            if p.dep_path == 2:
+                if not use_cols:
+                    self._logln(t("경고: TOPINV는 P/D 분리 전압이 필요합니다 (D열 WBL_PROG=0, WBL_OFF=−3)"))
+                elif abs(vD.get("WBL_PROG", 0.0)) > 1e-6:
+                    self._logln(t("경고: TOPINV는 D열 WBL_PROG가 WBL 휴지 레벨 → 0 V로 두세요 (현재 {v:g} V)").format(v=vD["WBL_PROG"]))
         name = self.name_var.get().strip() or "exp"
         self.writer = ExperimentWriter(self.out_var.get(), name, p, self.psu.rails if self.psu else {},
                                        {"base": vbase, "P": vP, "D": vD} if split else vbase)
@@ -1180,7 +1203,7 @@ class FeArrayGUI:
         if "wwl_hold" in d:
             self.hold_var.set(bool(d["wwl_hold"]))
         if "dep_path" in d:
-            self.dep_var.set("BOT" if int(d["dep_path"]) else "TOP")
+            self.dep_var.set(DEP_LABEL.get(int(d["dep_path"]), "TOP"))
         self._logln(t("YAML 불러옴: {fn}").format(fn=fn))
 
 
