@@ -10,7 +10,7 @@ Rail names (see firmware header):
     WBL_PROG  N2 pin HIGH  -> program voltage on WBL
     WBL_OFF   N2 pin LOW   -> erase / read-write level on WBL (often 0 V)
     VREAD     RWL read bias (below integrator virtual ground -> negative, rail wired inverted)
-    VDD       analog front-end (integrator / level shifter) supply
+    VDD/VSS   board +/- supplies (integrator / level shifter)
 
 YAML example (psu section):
     psu:
@@ -44,15 +44,17 @@ from typing import Dict, Iterable, List, Mapping
 
 from power_supply_EDU36311A import PowerSupplyEDU36311A, DummyPowerSupply
 
+# Wiring as found on the bench (2026-10-26): 3 x EDU36311A (NI MAX aliases POWER_SUPPLY_1/2/3)
 DEFAULT_RAILS = {
-    "VDD":      {"psu": 1, "ch": 1, "negative": False, "current_limit": 0.5},
-    "WWL_ON":   {"psu": 1, "ch": 2, "negative": False, "current_limit": 0.05},
-    "WWL_OFF":  {"psu": 1, "ch": 3, "negative": True,  "current_limit": 0.05},
-    "VREAD":    {"psu": 2, "ch": 1, "negative": True,  "current_limit": 0.05},
-    "WBL_PROG": {"psu": 2, "ch": 2, "negative": False, "current_limit": 0.05},
-    "WBL_OFF":  {"psu": 2, "ch": 3, "negative": True,  "current_limit": 0.05},
+    "WBL_OFF":  {"psu": 1, "ch": 1, "negative": True,  "current_limit": 0.05},  # N2 off  (6 V ch, 0..-V)
+    "VREAD":    {"psu": 1, "ch": 3, "negative": True,  "current_limit": 0.05},  # RWL read bias (below VINP)
+    "WBL_PROG": {"psu": 2, "ch": 1, "negative": False, "current_limit": 0.05},  # N2 on   (6 V ch max)
+    "WWL_OFF":  {"psu": 2, "ch": 3, "negative": True,  "current_limit": 0.05},  # N1 off
+    "VDD":      {"psu": 3, "ch": 1, "negative": False, "current_limit": 0.5},   # board +supply (6 V ch)
+    "VSS":      {"psu": 3, "ch": 2, "negative": True,  "current_limit": 0.5},   # board -supply
+    "WWL_ON":   {"psu": 3, "ch": 3, "negative": False, "current_limit": 0.05},  # N1 on
 }
-DEFAULT_ON_ORDER = ["VDD", "WWL_OFF", "WBL_OFF", "VREAD", "WWL_ON", "WBL_PROG"]
+DEFAULT_ON_ORDER = ["VDD", "VSS", "WWL_OFF", "WBL_OFF", "VREAD", "WWL_ON", "WBL_PROG"]
 DEFAULT_OFF_ORDER = list(reversed(DEFAULT_ON_ORDER))
 
 
@@ -69,6 +71,7 @@ class PowerSupplyMacro2T0C:
         self.dummy = dummy
         self.settle_delay = settle_delay
         self.psu: Dict[int, PowerSupplyEDU36311A] = {}
+        self.idn: Dict[int, str] = {}
         self.current: Dict[str, float] = {}
 
         self._check_rails()
@@ -89,6 +92,7 @@ class PowerSupplyMacro2T0C:
             cls = DummyPowerSupply if self.dummy else PowerSupplyEDU36311A
             p = cls(self.rm, res)
             idn = p.connect()
+            self.idn[pid] = idn
             print(f"PSU{pid}: {idn}")
             self.psu[pid] = p
         # all channels to 0 V, current limits, outputs ON (at 0 V)

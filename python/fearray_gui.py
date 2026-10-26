@@ -199,7 +199,7 @@ _EN.update({
     'readback 실패: {e}': 'readback failed: {e}',
     '모든 rail 0 V': 'all rails 0 V',
     'Arduino 포트를 선택하세요': 'Select the Arduino port',
-    'PSU1/PSU2 VISA 주소를 선택하세요 (↺)': 'Select PSU1/PSU2 VISA addresses (refresh button)',
+    'PSU1/PSU2/PSU3 VISA 주소를 선택하세요 (↺)': 'Select PSU1/PSU2/PSU3 VISA addresses (refresh button)',
     '연결 실패': 'Connection failed',
     '연결 해제': 'Disconnect',
     '연결됨': 'connected',
@@ -221,16 +221,18 @@ _EN.update({
     'YAML에 실험 {n}개 — GUI는 첫 번째만 불러옴 (전체 실행은 fearray_measure.py)': 'YAML has {n} experiments — GUI loads only the first (use fearray_measure.py for all)',
 })
 
-RAILS = ["VDD", "WWL_ON", "WWL_OFF", "WBL_PROG", "WBL_OFF", "VREAD"]
+RAILS = ["VDD", "VSS", "WWL_ON", "WWL_OFF", "WBL_PROG", "WBL_OFF", "VREAD"]
+PSU_IDS = (1, 2, 3)
 RAIL_HELP = {  # noqa
-    "VDD": "보드 아날로그 전원",
+    "VDD": "보드 + 전원 (PSU3 CH1)",
+    "VSS": "보드 − 전원 (PSU3 CH2, 반전 배선)",
     "WWL_ON": "WTR gate ON  (N1 HIGH)",
     "WWL_OFF": "WTR gate OFF (N1 LOW, 음수)",
     "WBL_PROG": "Program 레벨 (N2 HIGH)",
     "WBL_OFF": "Erase / read-write 레벨 (N2 LOW)",
     "VREAD": "Read 바이어스 (RWL, 가상접지보다 낮게 → 음수)",
 }
-DEFAULT_V = {"VDD": 5.0, "WWL_ON": 3.0, "WWL_OFF": -2.0, "WBL_PROG": 4.0, "WBL_OFF": 0.0, "VREAD": -1.0}
+DEFAULT_V = {"VDD": 5.0, "VSS": -5.0, "WWL_ON": 3.0, "WWL_OFF": -2.0, "WBL_PROG": 4.0, "WBL_OFF": 0.0, "VREAD": -1.0}
 SCENARIOS = ["PD", "DP", "P", "D", "R", "INIT", "DBGR", "DBGP", "DBGD", "LOOPP", "LOOPD", "LOOPR"]
 PARAM_FIELDS = [  # (key, label, default, tooltip)
     ("set_num", "Set 반복", 1, "P→D 반복 횟수 (PD/DP)"),
@@ -309,7 +311,7 @@ class FeArrayGUI:
         ttk.Button(f, text=SYM("↺", "R"), width=2, command=self._refresh_ports).grid(row=1, column=2)
 
         self.psu_vars = {}
-        for i, pid in enumerate((1, 2)):
+        for i, pid in enumerate(PSU_IDS):
             ttk.Label(f, text=f"PSU{pid} VISA").grid(row=2 + i, column=0, sticky="w")
             v = tk.StringVar()
             self.psu_vars[pid] = v
@@ -320,12 +322,12 @@ class FeArrayGUI:
 
         self.use_psu_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text=t("PSU 제어 사용 (해제 시 전압은 수동)"), variable=self.use_psu_var).grid(
-            row=4, column=0, columnspan=3, sticky="w")
+            row=5, column=0, columnspan=3, sticky="w")
 
         self.conn_btn = ttk.Button(f, text=t("연결"), command=self._toggle_connect)
-        self.conn_btn.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        self.conn_btn.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(4, 0))
         self.conn_lbl = ttk.Label(f, text=t("미연결"), foreground="gray")
-        self.conn_lbl.grid(row=6, column=0, columnspan=3, sticky="w")
+        self.conn_lbl.grid(row=7, column=0, columnspan=3, sticky="w")
 
     def _build_params(self, parent):
         f = ttk.LabelFrame(parent, text=t(" 시나리오 / 타이밍 "), padding=6)
@@ -425,14 +427,14 @@ class FeArrayGUI:
                 if ph != "base":
                     self.v_entries[ph].append(e)
         ttk.Label(f, text=t("P/D 칸이 비면 기본값 사용. 음수 rail은 PSU 채널을 반전 배선(negative) 해야 함."),
-                  foreground="gray", wraplength=330).grid(row=8, column=0, columnspan=4, sticky="w", pady=(4, 0))
+                  foreground="gray", wraplength=330).grid(row=2 + len(RAILS), column=0, columnspan=4, sticky="w", pady=(4, 0))
         g = ttk.Frame(f)
-        g.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        g.grid(row=3 + len(RAILS), column=0, columnspan=4, sticky="ew", pady=(4, 0))
         ttk.Button(g, text=t("전압 적용 (기본)"), command=lambda: self._apply_v("base")).pack(side="left", expand=True, fill="x")
         ttk.Button(g, text=t("측정값 읽기"), command=self._readback).pack(side="left", expand=True, fill="x", padx=2)
         ttk.Button(g, text=t("0 V로"), command=self._zero_v).pack(side="left", expand=True, fill="x")
         self.rail_lbl = ttk.Label(f, text="", foreground="gray", wraplength=330, justify="left")
-        self.rail_lbl.grid(row=10, column=0, columnspan=4, sticky="w")
+        self.rail_lbl.grid(row=4 + len(RAILS), column=0, columnspan=4, sticky="w")
         self._split_toggled()
 
     def _build_plot(self, parent):
@@ -662,10 +664,10 @@ class FeArrayGUI:
             labels = [l for _, l in sorted(labels)]
         except Exception as e:
             self._logln(t("VISA 목록 실패: {e}").format(e=e))
-        for pid in (1, 2):
+        for pid in PSU_IDS:
             getattr(self, f"psu_cb{pid}")["values"] = labels
-        # auto-pick by alias POWER_SUPPLY_1 / POWER_SUPPLY_2, else first two PSU entries
-        for pid in (1, 2):
+        # auto-pick by alias POWER_SUPPLY_n, else n-th PSU entry
+        for pid in PSU_IDS:
             if self.psu_vars[pid].get():
                 continue
             pick = next((l for l in labels if l.upper().startswith(f"POWER_SUPPLY_{pid} ")), None)
@@ -738,7 +740,7 @@ class FeArrayGUI:
         return out
 
     def _psu_cfg(self):
-        return {"resources": {1: self._visa_resource(1), 2: self._visa_resource(2)}, "rails": DEFAULT_RAILS}
+        return {"resources": {pid: self._visa_resource(pid) for pid in PSU_IDS}, "rails": DEFAULT_RAILS}
 
     def _apply_v(self, phase):
         if self.psu is None:
@@ -791,10 +793,13 @@ class FeArrayGUI:
                 if not sim:
                     import pyvisa
                     rm = pyvisa.ResourceManager()
-                    if not (self.psu_vars[1].get() and self.psu_vars[2].get()):
+                    if not all(self.psu_vars[pid].get() for pid in PSU_IDS):
                         raise RuntimeError(t("PSU1/PSU2 VISA 주소를 선택하세요 (↺)"))
                 self.psu = PowerSupplyMacro2T0C(rm, self._psu_cfg(), dummy=sim)
                 self.psu.connect()
+                for pid, idn in sorted(self.psu.idn.items()):
+                    self._logln(f"PSU{pid} = {self.psu.resources.get(pid, '?')} : {idn}")
+                self._logln("rails: " + ", ".join(f"{n}→PSU{r['psu']}CH{r['ch']}{'(−)' if r['negative'] else ''}" for n, r in self.psu.rails.items()))
         except Exception as e:
             self.ard = None; self.psu = None
             messagebox.showerror(t("연결 실패"), str(e)); return
@@ -1102,7 +1107,7 @@ class FeArrayGUI:
             cfg = yaml.safe_load(f)
         self.out_var.set(cfg.get("output_dir", self.out_var.get()))
         self.port_var.set(cfg.get("arduino", {}).get("port", self.port_var.get()))
-        for pid in (1, 2):
+        for pid in PSU_IDS:
             r = cfg.get("psu", {}).get("resources", {}).get(pid) or cfg.get("psu", {}).get("resources", {}).get(str(pid))
             if r:
                 self.psu_vars[pid].set(r)

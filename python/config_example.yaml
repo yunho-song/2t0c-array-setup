@@ -9,18 +9,20 @@ arduino:
 
 # ── Power supplies: 2 x Keysight EDU36311A (6 rails). Board supply is separate. ──
 psu:
-  resources:
-    1: "USB0::0x2A8D::0x3302::CN00000001::INSTR"   # <- pyvisa.ResourceManager().list_resources()
-    2: "USB0::0x2A8D::0x3302::CN00000002::INSTR"
-  rails:                       # psu/ch wiring. negative:true = channel wired with "+" to GND
-    VDD:      {psu: 1, ch: 1, negative: false, current_limit: 0.50}   # CH1: 6 V max
-    WWL_ON:   {psu: 1, ch: 2, negative: false, current_limit: 0.05}
-    WWL_OFF:  {psu: 1, ch: 3, negative: true,  current_limit: 0.05}
-    VREAD:    {psu: 2, ch: 1, negative: true,  current_limit: 0.05}   # CH1: 6 V max. read bias below virtual ground -> wired inverted
-    WBL_PROG: {psu: 2, ch: 2, negative: false, current_limit: 0.05}
-    WBL_OFF:  {psu: 2, ch: 3, negative: true,  current_limit: 0.05}   # erase level: 0 or negative -> wired inverted
-  on_order:  [VDD, WWL_OFF, WBL_OFF, VREAD, WWL_ON, WBL_PROG]
-  off_order: [WBL_PROG, WWL_ON, VREAD, WBL_OFF, WWL_OFF, VDD]
+  resources:                     # NI MAX alias or full VISA string (pyvisa list_resources_info)
+    1: "POWER_SUPPLY_1"          # CN65070038
+    2: "POWER_SUPPLY_2"          # CN65060143
+    3: "POWER_SUPPLY_3"          # CN65080108
+  rails:                         # bench wiring 2026-10-26. negative:true = channel "+" wired to GND
+    WBL_OFF:  {psu: 1, ch: 1, negative: true,  current_limit: 0.05}   # N2 off : rest 0 V / erase -V
+    VREAD:    {psu: 1, ch: 3, negative: true,  current_limit: 0.05}   # RWL read bias, below VINP
+    WBL_PROG: {psu: 2, ch: 1, negative: false, current_limit: 0.05}   # N2 on  : program +V (6 V max)
+    WWL_OFF:  {psu: 2, ch: 3, negative: true,  current_limit: 0.05}   # N1 off
+    VDD:      {psu: 3, ch: 1, negative: false, current_limit: 0.50}   # board +supply
+    VSS:      {psu: 3, ch: 2, negative: true,  current_limit: 0.50}   # board -supply
+    WWL_ON:   {psu: 3, ch: 3, negative: false, current_limit: 0.05}   # N1 on
+  on_order:  [VDD, VSS, WWL_OFF, WBL_OFF, VREAD, WWL_ON, WBL_PROG]
+  off_order: [WBL_PROG, WWL_ON, VREAD, WBL_OFF, WWL_OFF, VSS, VDD]
   ramp_steps: 3
   settle_after_apply_s: 1.0
   ramp_down_at_end: true
@@ -28,6 +30,7 @@ psu:
 # ── Base rail voltages [V] (overridable per experiment) ──
 voltages:
   VDD: 5.0
+  VSS: -5.0          # board negative supply (confirm the value used so far on PSU3 CH2)
   WWL_ON: 3.0          # WTR gate ON  (N1 pin HIGH)
   WWL_OFF: -2.0        # WTR gate OFF (N1 pin LOW)
   WBL_PROG: 4.0        # program level on WBL (N2 pin HIGH)
