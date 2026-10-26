@@ -111,7 +111,7 @@ class FeArraySim:
         elif s == "DBGD":
             for _ in range(p.dep_num):
                 self._pulse(p, False)
-        elif s == "INIT":
+        elif s in ("INIT", "N2HI", "N2LO"):      # N2HI/N2LO: WBL rest-state switch used while rails change (TOPINV)
             pass
         elif s.startswith("LOOP"):
             while not self.aborted:

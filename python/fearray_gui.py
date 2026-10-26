@@ -925,15 +925,32 @@ class FeArrayGUI:
         self.worker.start()
 
     def _run_worker(self, p: ScenarioParams, vbase, vP, vD, split):
-        def rails(v):
-            if self.psu is not None:
-                self.psu.apply(v); time.sleep(0.5)
-                self.q.put(("log", f"PSU set {v}"))
-                try:
-                    rb = self.psu.readback()
-                    self.q.put(("log", "PSU meas " + ", ".join(f"{k}={val:.2f}V" for k, (val, _i) in rb.items())))
-                except Exception as e:
-                    self.q.put(("log", f"PSU readback failed: {e}"))
+        def n2(state: str):
+            """N2HI / N2LO: switch the WBL rest state in the firmware (no pulses, no read)."""
+            for _ in self.ard.run(ScenarioParams(scenario=state, dep_path=p.dep_path)):
+                pass
+            self.q.put(("log", f"Arduino {state}"))
+
+        def rails(v, phase=None):
+            if self.psu is None:
+                return
+            v = dict(v)
+            if p.dep_path == 2 and phase in ("P", "D"):
+                # TOPINV: change the WBL rail that N2 is NOT selecting, flip N2, then the other one,
+                # so WBL stays at 0 V while the supplies ramp (otherwise WBL sits at +WBL_PROG / -WBL_OFF for seconds)
+                if phase == "D":          # coming from N2 LOW (WBL = WBL_OFF)
+                    if "WBL_PROG" in v: self.psu.set_rail("WBL_PROG", float(v.pop("WBL_PROG")))
+                    n2("N2HI")            # WBL -> WBL_PROG rail (0 V)
+                else:                     # coming from N2 HIGH (WBL = WBL_PROG)
+                    if "WBL_OFF" in v: self.psu.set_rail("WBL_OFF", float(v.pop("WBL_OFF")))
+                    n2("N2LO")            # WBL -> WBL_OFF rail (0 V)
+            self.psu.apply(v); time.sleep(0.5)
+            self.q.put(("log", f"PSU set {v}"))
+            try:
+                rb = self.psu.readback()
+                self.q.put(("log", "PSU meas " + ", ".join(f"{k}={val:.2f}V" for k, (val, _i) in rb.items())))
+            except Exception as e:
+                self.q.put(("log", f"PSU readback failed: {e}"))
         try:
             if split:
                 order = ["P", "D"] if p.scenario == "PD" else ["D", "P"]
@@ -942,7 +959,7 @@ class FeArrayGUI:
                     for ph in order:
                         if self.stop_evt.is_set():
                             break
-                        rails(vP if ph == "P" else vD)
+                        rails(vP if ph == "P" else vD, ph)
                         q = ScenarioParams(**{**asdict(p), "scenario": ph, "set_num": 1})
                         for rec in self.ard.run(q):
                             if not first and rec.phase == "I":
@@ -953,7 +970,8 @@ class FeArrayGUI:
                         if getattr(self.ard, "aborted", False):
                             break
             else:
-                rails(vbase)
+                ph1 = "P" if p.scenario in ("P", "DBGP", "LOOPP") else ("D" if p.scenario in ("D", "DBGD", "LOOPD") else None)
+                rails(vbase, ph1)
                 for rec in self.ard.run(p):
                     self.q.put(("rec", rec))
             self.q.put(("done", t("중지됨") if self.stop_evt.is_set() else t("완료")))

@@ -57,6 +57,11 @@
  *                                        D phase WBL_PROG = 0, WBL_OFF = -V.  Unselected rows stay at 0 V.
  *  23  extra7        (reserved)
  *
+ *  Scenarios N2HI / N2LO: no pulses, no read. Set the N2 rest state (all rows) and reply EOD>.
+ *  The host uses them with dep_path=2 so that WBL never leaves 0 V while PSU rails are re-programmed:
+ *     P->D : WBL_PROG->0 (N2 LOW, no effect) | N2HI | WBL_OFF->-V (N2 HIGH, no effect) | run D
+ *     D->P : WBL_OFF->0  (N2 HIGH, no effect) | N2LO | WBL_PROG->+V (N2 LOW, no effect) | run P
+ *
  *  Example:  PD,1,1,3,10,10,5000,5000,20,20,20,1000,1,20,1,N1OFF,10,0,100,0,0,0|
  *            -> cell (0,0), 3 sets of 10 P + 10 D pulses of 5 ms, read after every pulse,
  *               full 25-cell map at every read, read with WTR off, 10-sample ADC average.
@@ -155,8 +160,12 @@ uint32_t maskToPins(int mask, const uint32_t *table) {
   return a;
 }
 
-void allLinesOff() {
-  PIOC->PIO_CODR = N1_ALL | N2_ALL | UDEN_ALL | UD_ALL;
+uint32_t g_n2_rest = 0;                 // N2 bits held HIGH between pulses / during reads (0 or N2_ALL)
+void n2Rest() { PIOC->PIO_CODR = N2_ALL & ~g_n2_rest; PIOC->PIO_SODR = g_n2_rest; }
+
+void allLinesOff() {                     // keeps the N2 rest state (TOPINV: WBL stays on the 0 V rail between commands)
+  PIOC->PIO_CODR = (N1_ALL | N2_ALL | UDEN_ALL | UD_ALL) & ~g_n2_rest;
+  PIOC->PIO_SODR = g_n2_rest;
   PIOD->PIO_CODR = WL_ALL;
 }
 
@@ -194,9 +203,6 @@ void erasePulse(uint32_t n1) {
 // Erase, pulsed-WBL variant (dep_path=2, TOPINV): N2 rest = HIGH (WBL = WBL_PROG rail = 0 V in D phase),
 //   selected rows' N2 pulsed LOW (WBL = WBL_OFF = -V) only while WWL is open.  Mirror image of programPulse.
 //   N1 ON -> pre -> N2(sel) LOW -> dep_pw -> N2(sel) HIGH -> zero -> N1 OFF -> post
-uint32_t g_n2_rest = 0;                 // N2 bits held HIGH between pulses / during reads (0 or N2_ALL)
-void n2Rest() { PIOC->PIO_CODR = N2_ALL; PIOC->PIO_SODR = g_n2_rest; }
-
 void erasePulseInv(uint32_t n1, uint32_t n2) {
   n2Rest();
   PIOC->PIO_SODR = n1;
@@ -387,12 +393,14 @@ void loop() {
   if (!parseSerial(g)) return;
 
   g_abort = false;
+  const String &s = g.scenario;
+  // TOPINV: a D-type scenario rests with N2 HIGH from the very first read (WBL = WBL_PROG rail = 0 V).
+  // N2HI/N2LO only change this rest state (used by the host while it re-programs the PSU rails).
+  if (s == "N2HI")      g_n2_rest = N2_ALL;
+  else if (s == "N2LO") g_n2_rest = 0;
+  else g_n2_rest = (g.dep_path == 2 && (s == "D" || s == "DP" || s == "DBGD" || s == "LOOPD")) ? N2_ALL : 0;
   allLinesOff();
   FB_CLR(); HLCHOP_CLR();
-  const String &s = g.scenario;
-  // TOPINV: a D-type scenario rests with N2 HIGH from the very first read (WBL = WBL_PROG rail = 0 V)
-  g_n2_rest = (g.dep_path == 2 && (s == "D" || s == "DP" || s == "DBGD" || s == "LOOPD")) ? N2_ALL : 0;
-  n2Rest();
 
   if (s == "P") {
     readMap(0, 'I', 0);
@@ -421,6 +429,7 @@ void loop() {
     readMap(0, 'R', 0);
   } else if (s == "INIT") {                    // all lines off, one map read
     readMap(0, 'I', 0);
+  } else if (s == "N2HI" || s == "N2LO") {     // rest state already applied above; just acknowledge with EOD>
   } else if (s == "LOOPP" || s == "LOOPD" || s == "LOOPR") {   // oscilloscope test: repeat until '!'
     uint32_t n1 = maskToPins(g.col_mask, N1_PIN);
     uint32_t n2 = maskToPins(g.row_mask, N2_PIN);
@@ -444,8 +453,7 @@ void loop() {
     Serial.print("ERR,unknown scenario "); Serial.print(s); Serial.println('>');
   }
 
-  allLinesOff();
-  if (g_n2_rest) PIOC->PIO_SODR = N2_ALL;   // TOPINV: keep WBL on the 0 V rail until the host changes rails
+  allLinesOff();                             // N2 rest state is kept (TOPINV: WBL stays on the 0 V rail)
   if (g_abort) Serial.println("ABORT>");
   delay(50);
   Serial.println("EOD>");
