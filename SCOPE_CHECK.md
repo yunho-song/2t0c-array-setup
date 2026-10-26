@@ -19,7 +19,8 @@
 | 시나리오 | 프로브 | 기대 파형 | 확인 포인트 |
 |---|---|---|---|
 | LOOPP | 51(N1), 39(N2) | N1 High 5040 µs. N2는 N1보다 20 µs 늦게 올라가 5000 µs 유지, N1보다 20 µs 먼저 내려감 | pre/zero = 20 µs 오프셋, P폭 값 변경 시 폭 추종 |
-| LOOPD | 51(N1), 39(N2) | N1 5000 µs 단일 펄스, N2 계속 Low | D폭 값 추종, N2가 절대 올라가지 않음 |
+| LOOPD (D 경로 = TOP) | 51(N1), 39(N2) | N1 5000 µs 단일 펄스, N2 계속 Low. 보드 UP0는 WBL_OFF 고정 → 변화 없음(정상) | depression 전압은 UP0에 '펄스'가 아니라 WBL_OFF 레벨로 나타남 |
+| LOOPD (D 경로 = BOT, 권장) | 46(UDEN0=S2), 34(UD0 select) | UD 34번 High 5040 µs, 그 안에 UDEN 46번 5000 µs 펄스 (program과 대칭). 보드 UD0가 BLBTM_OFF↔WBL_DEP 스윙 | row 1~4의 UD 선택 핀(펌웨어 추정 33,7,6,5)은 실제 PCB와 대조 필수 |
 | LOOPP, 셀 (1,2) | 49(N1, col 2), 38(N2, row 1) | 선택 셀에 따라 핀이 바뀜: col c → 핀 51−c, row r → 핀 39−r | 핀 테이블(.ino 상단) 검증 |
 | LOOPR | 25(RWL row0), 31(CK), 53(CON), 52(CR) | CON Low·CR High 약 100 ms 구간 / RWL은 DFF 입력이라 100 µs 주기 짧은 펄스 ×1000, CK 매번 토글 / 끝에 CON High → CR Low 3 ms | read_time 바꾸면 구간 길이 변경(1000→100 ms) |
 
@@ -47,7 +48,9 @@ PSU "제어 사용" 켜고 전압은 안전값으로: VDD 5, WWL_ON +1, WWL_OFF 
 
 ## 알아 두어야 할 것
 
-- Erase(D) 펄스 = WBL_OFF rail 전압이 게이트에 걸리는 것. 양/음 세 레벨(prog/rest/dep)이 필요하므로 **P phase: WBL_OFF=0, D phase: WBL_OFF=−3** 로 Python이 바꿈(`phase_voltages`). 이때 read는 `N1OFF`.
+- Erase(D)는 두 경로: **BOT(권장)** = 보드의 하단 경로 UD/UDEN. UD 선택 HIGH → BLBTM = WBL_DEP(−3 V, 반전 배선) → UDEN(S2) 펄스. program과 대칭이라 PSU 전환 없이 P/D 혼합 가능. **TOP** = WWL 펄스로 게이트를 WBL_OFF에 연결 → WBL_OFF가 0/−3을 겸하므로 `phase_voltages`로 phase마다 바꿔야 하고 read는 `N1OFF`.
+- BOT 경로 핀: UDEN0..4 = 46,45,44,41,40 (4T0C 표). UD0 = 34 확인, UD1..4 = 33,7,6,5 **추정** → LOOPD(BOT)로 row를 바꿔가며 어느 핀이 토글되는지 확인하고 `.ino`의 `UD_PIN` 수정.
+- 새 rail: WBL_DEP(PSU2 CH2, 반전), BLBTM_OFF(PSU1 CH2). UDEN의 게이트 레벨(3V/−2V mux)이 WWL_ON/WWL_OFF rail을 공유하는지 확인.
 - RWL(VREAD)은 반전 적분기 때문에 가상접지(VINP)보다 **낮아야** ADC가 양으로 올라감. VINP가 0 V가 아닐 수 있으니 보드 설정 확인.
 - 음전압 rail(WWL_OFF, WBL_OFF, VREAD)은 PSU 채널 + 단자를 GND에 묶어 만들고 yaml `negative: true`. 코드는 |V|만 설정하고 극성 불일치는 에러로 막음.
 - row×col 교차곱 선택. (0,0)+(1,1)을 찍으면 (0,1),(1,0)도 선택됨(+ 표시).

@@ -46,6 +46,10 @@
  *  19  extra3        R scenario  : interval between map reads [s]
  *  20  extra4        R scenario  : number of map reads
  *  21  extra5        phase_gap_ms: PD/DP에서 P phase와 D phase 사이 대기 [ms]
+ *  22  extra6        dep_path : 0 = TOP (erase = WWL pulse with WBL at WBL_OFF, Rev1.0 FEE)
+ *                               1 = BOT (erase = UD select ON (BLBTM = WBL_DEP, negative) + UDEN(S2) pulse,
+ *                                        symmetric to program; board's dedicated depression path)
+ *  23  extra7        (reserved)
  *
  *  Example:  PD,1,1,3,10,10,5000,5000,20,20,20,1000,1,20,1,N1OFF,10,0,100,0,0,0|
  *            -> cell (0,0), 3 sets of 10 P + 10 D pulses of 5 ms, read after every pulse,
@@ -71,6 +75,12 @@
 const uint32_t N1_PIN[5] = {1u << 12, 1u << 13, 1u << 14, 1u << 15, 1u << 16};
 // N2 = WBL select, indexed by ROW (pins 39,38,37,36,35 -> PC7..PC3)
 const uint32_t N2_PIN[5] = {1u << 7, 1u << 6, 1u << 5, 1u << 4, 1u << 3};
+// Bottom (depression) path — board connectors UDEN0..4 / UD0..4
+// UDEN = S2 gate select, indexed by COLUMN (pins 46,45,44,41,40 -> PC17,PC18,PC19,PC9,PC8)   [from 4T0C table]
+const uint32_t UDEN_PIN[5] = {1u << 17, 1u << 18, 1u << 19, 1u << 9, 1u << 8};
+// UD = BLBTM mux select, indexed by ROW. Only row 0 (pin 34 = PC2) is confirmed by the schematic;
+// rows 1..4 are a GUESS (pins 33,7,6,5 -> PC1,PC23,PC24,PC25) — verify with LOOPD dep_path=1 on each row.
+const uint32_t UD_PIN[5]   = {1u << 2, 1u << 1, 1u << 23, 1u << 24, 1u << 25};
 // RWL, indexed by ROW (pins 25,26,27,28,29 -> PD0,PD1,PD2,PD3,PD6)
 const uint32_t WL_PIN[5] = {1u << 0, 1u << 1, 1u << 2, 1u << 3, 1u << 6};
 // ADC channel per COLUMN (A0..A4 -> ADC ch7..ch3)
@@ -78,6 +88,8 @@ const int ADC_CH[5] = {7, 6, 5, 4, 3};
 
 const uint32_t N1_ALL = N1_PIN[0] | N1_PIN[1] | N1_PIN[2] | N1_PIN[3] | N1_PIN[4];
 const uint32_t N2_ALL = N2_PIN[0] | N2_PIN[1] | N2_PIN[2] | N2_PIN[3] | N2_PIN[4];
+const uint32_t UDEN_ALL = UDEN_PIN[0] | UDEN_PIN[1] | UDEN_PIN[2] | UDEN_PIN[3] | UDEN_PIN[4];
+const uint32_t UD_ALL   = UD_PIN[0] | UD_PIN[1] | UD_PIN[2] | UD_PIN[3] | UD_PIN[4];
 const uint32_t WL_ALL = WL_PIN[0] | WL_PIN[1] | WL_PIN[2] | WL_PIN[3] | WL_PIN[4];
 
 // Control signals (same as 2T0C_Ferro_Rev1.0 / 4T0C)
@@ -105,12 +117,13 @@ struct Params {
   int pre_en, post_en, zero_t;
   int read_time, read_set_time, read_delay, read_interval;
   String read_mode;
-  double extra[6];
+  double extra[8];
   // derived
   int avg_count;
   int wwl_hold;
   int read_wait_ms;
   int phase_gap_ms;
+  int dep_path;
 };
 Params g;
 int adc_row[5];
@@ -137,7 +150,7 @@ uint32_t maskToPins(int mask, const uint32_t *table) {
 }
 
 void allLinesOff() {
-  PIOC->PIO_CODR = N1_ALL | N2_ALL;
+  PIOC->PIO_CODR = N1_ALL | N2_ALL | UDEN_ALL | UD_ALL;
   PIOD->PIO_CODR = WL_ALL;
 }
 
@@ -170,6 +183,20 @@ void erasePulse(uint32_t n1) {
   PIOC->PIO_CODR = n1;
   udelay(g.post_en);
   udelay(g.zero_t);
+}
+
+// Erase via bottom path (dep_path=1): UD select ON (BLBTM = WBL_DEP, negative) -> pre -> UDEN(S2) ON -> pw
+//   -> UDEN OFF -> zero -> UD OFF -> post.  Top path stays off (N1 OFF, N2 LOW).
+void erasePulseBot(uint32_t ud, uint32_t uden) {
+  PIOC->PIO_CODR = N1_ALL | N2_ALL;
+  PIOC->PIO_SODR = ud;
+  udelay(g.pre_en);
+  PIOC->PIO_SODR = uden;
+  udelay(g.dep_pw);
+  PIOC->PIO_CODR = uden;
+  udelay(g.zero_t);
+  PIOC->PIO_CODR = ud;
+  udelay(g.post_en);
 }
 
 // ───────────────────────────── READ ───────────────────────────────────
@@ -258,8 +285,10 @@ void runProgramPhase(int set) {
 
 void runErasePhase(int set) {
   uint32_t n1 = maskToPins(g.col_mask, N1_PIN);
+  uint32_t ud = maskToPins(g.row_mask, UD_PIN);
+  uint32_t uden = maskToPins(g.col_mask, UDEN_PIN);
   for (int k = 0; k < g.dep_num && !checkAbort(); k++) {
-    erasePulse(n1);
+    if (g.dep_path == 1) erasePulseBot(ud, uden); else erasePulse(n1);
     if (g.read_interval > 0 && ((k + 1) % g.read_interval == 0))
       readMap(set, 'D', k + 1);
   }
@@ -267,7 +296,7 @@ void runErasePhase(int set) {
 
 // ───────────────────────────── SERIAL PARSE ───────────────────────────
 bool parseSerial(Params &p) {
-  const int VAR_NUM = 22;
+  const int VAR_NUM = 24;
   String line = Serial.readStringUntil('|');
   line.trim();
   if (line.length() == 0) return false;
@@ -299,12 +328,13 @@ bool parseSerial(Params &p) {
   p.read_delay    = f[13].toInt();
   p.read_interval = f[14].toInt();
   p.read_mode     = f[15]; p.read_mode.toUpperCase();
-  for (int i = 0; i < 6; i++) p.extra[i] = (16 + i < count) ? f[16 + i].toDouble() : 0.0;
+  for (int i = 0; i < 8; i++) p.extra[i] = (16 + i < count) ? f[16 + i].toDouble() : 0.0;
 
   p.avg_count    = (int)p.extra[0]; if (p.avg_count < 1) p.avg_count = 1;
   p.wwl_hold     = (int)p.extra[1] ? 1 : 0;
   p.read_wait_ms = (int)p.extra[2];
   p.phase_gap_ms = (int)p.extra[5];
+  p.dep_path     = (int)p.extra[6] ? 1 : 0;
   if (p.read_mode != "N1ALL" && p.read_mode != "N1SEL") p.read_mode = "N1OFF";
   return true;
 }
@@ -361,13 +391,15 @@ void loop() {
   } else if (s == "LOOPP" || s == "LOOPD" || s == "LOOPR") {   // oscilloscope test: repeat until '!'
     uint32_t n1 = maskToPins(g.col_mask, N1_PIN);
     uint32_t n2 = maskToPins(g.row_mask, N2_PIN);
+    uint32_t ud = maskToPins(g.row_mask, UD_PIN);
+    uint32_t uden = maskToPins(g.col_mask, UDEN_PIN);
     int row = 0; for (int r = 0; r < 5; r++) if (g.row_mask & (1 << r)) { row = r; break; }
     PIOC->PIO_CODR = N2_ALL;
     if (s == "LOOPP" && g.wwl_hold) PIOC->PIO_SODR = n1;
     Serial.println("LOOP>");
     while (!checkAbort()) {
       if (s == "LOOPP")      programPulse(n1, n2);
-      else if (s == "LOOPD") erasePulse(n1);
+      else if (s == "LOOPD") { if (g.dep_path == 1) erasePulseBot(ud, uden); else erasePulse(n1); }
       else                   readRow(row, adc_row);
       if (g.read_wait_ms > 0) delay(g.read_wait_ms);
     }

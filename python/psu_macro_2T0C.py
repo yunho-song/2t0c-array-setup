@@ -53,8 +53,11 @@ DEFAULT_RAILS = {
     "VDD":      {"psu": 3, "ch": 1, "negative": False, "current_limit": 0.5},   # board +supply (6 V ch)
     "VSS":      {"psu": 3, "ch": 2, "negative": True,  "current_limit": 0.5},   # board -supply
     "WWL_ON":   {"psu": 3, "ch": 3, "negative": False, "current_limit": 0.05},  # N1 on
+    # bottom (depression) path, used when dep_path=1 — channels were free; wire & verify
+    "WBL_DEP":  {"psu": 2, "ch": 2, "negative": True,  "current_limit": 0.05},  # UD on  (BLBTM ON, negative)
+    "BLBTM_OFF":{"psu": 1, "ch": 2, "negative": False, "current_limit": 0.05},  # UD off (0 V)
 }
-DEFAULT_ON_ORDER = ["VDD", "VSS", "WWL_OFF", "WBL_OFF", "VREAD", "WWL_ON", "WBL_PROG"]
+DEFAULT_ON_ORDER = ["VDD", "VSS", "WWL_OFF", "WBL_OFF", "BLBTM_OFF", "VREAD", "WWL_ON", "WBL_PROG", "WBL_DEP"]
 DEFAULT_OFF_ORDER = list(reversed(DEFAULT_ON_ORDER))
 
 

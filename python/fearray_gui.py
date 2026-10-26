@@ -128,6 +128,7 @@ def setup_fonts(root) -> bool:
 
 
 _EN.update({
+    'D 경로': 'D path', 'BOT=UD/UDEN  TOP=WWL펄스': 'BOT=UD/UDEN  TOP=WWL pulse', 'BOT: UD/UDEN 하단 경로, WBL_DEP 음전압 펄스 (권장)  /  TOP: WWL 펄스, WBL=WBL_OFF (phase_voltages 필요)': 'BOT: UD/UDEN bottom path, WBL_DEP negative pulse (recommended) / TOP: WWL pulse with WBL=WBL_OFF (needs phase_voltages)', 'Rest 레벨 (N2 LOW). TOP 경로 erase 레벨 겸함': 'rest level (N2 LOW); also TOP-path erase level', 'Depression 레벨 (UD on, 하단 경로, 음수)': 'depression level (UD on, bottom path, negative)', '하단 경로 off 레벨 (0 V)': 'bottom path off level (0 V)',
     '  셀별 그래프 (5×5)  ': '  Per-cell plots (5x5)  ', 'Y축 공통 (셀 간 비교)': 'shared Y axis', '주황 = 선택 셀, 제목 = (row,col) 마지막 ADC': 'orange = selected cell, title = (row,col) last ADC',
     '보기': 'View', '한 그래프 (선택=색, 비선택=회색)': 'one plot (selected=color, others=gray)', '선택 셀만': 'selected cells only', 'row별 5개 그래프': '5 plots (per row)', '5×5 격자 (셀마다)': '5x5 grid (per cell)', '맵 표시': 'show map',
     '보드 아날로그 전원': 'board analog supply',
@@ -221,7 +222,7 @@ _EN.update({
     'YAML에 실험 {n}개 — GUI는 첫 번째만 불러옴 (전체 실행은 fearray_measure.py)': 'YAML has {n} experiments — GUI loads only the first (use fearray_measure.py for all)',
 })
 
-RAILS = ["VDD", "VSS", "WWL_ON", "WWL_OFF", "WBL_PROG", "WBL_OFF", "VREAD"]
+RAILS = ["VDD", "VSS", "WWL_ON", "WWL_OFF", "WBL_PROG", "WBL_OFF", "WBL_DEP", "BLBTM_OFF", "VREAD"]
 PSU_IDS = (1, 2, 3)
 RAIL_HELP = {  # noqa
     "VDD": "보드 + 전원 (PSU3 CH1)",
@@ -229,10 +230,12 @@ RAIL_HELP = {  # noqa
     "WWL_ON": "WTR gate ON  (N1 HIGH)",
     "WWL_OFF": "WTR gate OFF (N1 LOW, 음수)",
     "WBL_PROG": "Program 레벨 (N2 HIGH)",
-    "WBL_OFF": "Erase / read-write 레벨 (N2 LOW)",
+    "WBL_OFF": "Rest 레벨 (N2 LOW). TOP 경로 erase 레벨 겸함",
+    "WBL_DEP": "Depression 레벨 (UD on, 하단 경로, 음수)",
+    "BLBTM_OFF": "하단 경로 off 레벨 (0 V)",
     "VREAD": "Read 바이어스 (RWL, 가상접지보다 낮게 → 음수)",
 }
-DEFAULT_V = {"VDD": 5.0, "VSS": -5.0, "WWL_ON": 3.0, "WWL_OFF": -2.0, "WBL_PROG": 4.0, "WBL_OFF": 0.0, "VREAD": -1.0}
+DEFAULT_V = {"VDD": 5.0, "VSS": -5.0, "WWL_ON": 3.0, "WWL_OFF": -2.0, "WBL_PROG": 4.0, "WBL_OFF": 0.0, "WBL_DEP": -3.0, "BLBTM_OFF": 0.0, "VREAD": -1.0}
 SCENARIOS = ["PD", "DP", "P", "D", "R", "INIT", "DBGR", "DBGP", "DBGD", "LOOPP", "LOOPD", "LOOPR"]
 PARAM_FIELDS = [  # (key, label, default, tooltip)
     ("set_num", "Set 반복", 1, "P→D 반복 횟수 (PD/DP)"),
@@ -357,6 +360,13 @@ class FeArrayGUI:
                      state="readonly").grid(row=r, column=1, sticky="w")
         self.hold_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text=t("P 중 WWL 유지"), variable=self.hold_var).grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
+        r += 1
+        ttk.Label(f, text=t("D 경로")).grid(row=r, column=0, sticky="w")
+        self.dep_var = tk.StringVar(value="BOT")
+        cb_dep = ttk.Combobox(f, textvariable=self.dep_var, values=["BOT", "TOP"], width=7, state="readonly")
+        cb_dep.grid(row=r, column=1, sticky="w")
+        cb_dep.bind("<Enter>", lambda _e: self._status(t("BOT: UD/UDEN 하단 경로, WBL_DEP 음전압 펄스 (권장)  /  TOP: WWL 펄스, WBL=WBL_OFF (phase_voltages 필요)")))
+        ttk.Label(f, text=t("BOT=UD/UDEN  TOP=WWL펄스"), foreground="gray").grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
 
         ttk.Label(f, text=t("저장 폴더")).grid(row=r + 1, column=0, sticky="w")
         self.out_var = tk.StringVar(value=os.path.join(HERE, "data"))
@@ -508,6 +518,7 @@ class FeArrayGUI:
         for v in list(self.pvars.values()) + [self.rmode_var, self.scen_var] + list(self.vvars["base"].values()):
             v.trace_add("write", lambda *_: self._schedule_wave())
         self.hold_var.trace_add("write", lambda *_: self._schedule_wave())
+        self.dep_var.trace_add("write", lambda *_: self._schedule_wave())
         self._draw_waveforms()
 
     def _schedule_wave(self):
@@ -586,14 +597,27 @@ class FeArrayGUI:
              ["N1", "N2", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
         axes[0].text(0.0, -0.04, MAP_W, transform=axes[0].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         # ── Erase ──
-        wl = [W(pre), W(dpw), W(post), W(zero)]
-        labs = [(gap, "N2 OFF"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['post_en']}\n= {post:g}"), (wl[3], f"{L['zero_t']}\n= {zero:g}"), (gap, "")]
-        n2 = [(gap, 0), (wl[0], 0), (wl[1], 0), (wl[2], 0), (wl[3], 0), (gap, 0)]
-        n1 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
-        sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.15), (wl[3], 0.15), (gap, 0.15)]
-        draw(axes[1], f"ERASE pulse ×1  (scenario D / PD)   N2 stays LOW → WBL = WBL_OFF {v['WBL_OFF']:g} V, N1 pulse pulls SN to it",
-             ["N2", "N1", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
-        axes[1].text(0.0, -0.04, MAP_W, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
+        if self.dep_var.get() == "BOT":
+            wl = [W(pre), W(dpw), W(zero), W(post)]
+            labs = [(gap, ""), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['zero_t']}\n= {zero:g}"), (wl[3], f"{L['post_en']}\n= {post:g}"), (gap, "")]
+            ud = [(gap, 0), (wl[0], 1), (wl[1], 1), (wl[2], 1), (wl[3], 0), (gap, 0)]
+            uden = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
+            sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.6), (wl[3], 0.6), (gap, 0.6)]
+            NAME.update({"N2": "UD (sel)", "N1": "UDEN (S2)"})
+            draw(axes[1], f"ERASE pulse ×1  (dep_path=BOT, board UD/UDEN path)   UD HIGH → BLBTM = WBL_DEP {v['WBL_DEP']:g} V, UDEN pulse pulls SN to it",
+                 ["N2", "N1", "SN"], {"N1": uden, "N2": ud, "SN": sn}, labs)
+            MAP_D = (f"UD = BLBTM select (pin 34…): LOW→BLBTM_OFF {v['BLBTM_OFF']:g} V / HIGH→WBL_DEP {v['WBL_DEP']:g} V     "
+                     f"UDEN = S2 gate (pin 46…): WWL_OFF→WWL_ON     top path N1/N2 stay off")
+            axes[1].text(0.0, -0.04, MAP_D, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
+        else:
+            wl = [W(pre), W(dpw), W(post), W(zero)]
+            labs = [(gap, "N2 OFF"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['post_en']}\n= {post:g}"), (wl[3], f"{L['zero_t']}\n= {zero:g}"), (gap, "")]
+            n2 = [(gap, 0), (wl[0], 0), (wl[1], 0), (wl[2], 0), (wl[3], 0), (gap, 0)]
+            n1 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
+            sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.15), (wl[3], 0.15), (gap, 0.15)]
+            draw(axes[1], f"ERASE pulse ×1  (dep_path=TOP)   N2 stays LOW → WBL = WBL_OFF {v['WBL_OFF']:g} V, N1 pulse pulls SN to it",
+                 ["N2", "N1", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
+            axes[1].text(0.0, -0.04, MAP_W, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         # ── Read (one row) ──
         tint = rt * 100.0; tdel = rd * 10.0
         wl = [W(rw * 1000), W(rst) if rmode != "N1OFF" else 0.3, W(tint), W(tdel), 0.9, W(3000)]
@@ -831,7 +855,8 @@ class FeArrayGUI:
             s = self.pvars[key].get().strip()
             kw[key] = float(s) if key == "r_interval_s" else int(float(s))
         return ScenarioParams(scenario=self.scen_var.get(), rows=rows, cols=cols,
-                              read_mode=self.rmode_var.get(), wwl_hold=int(self.hold_var.get()), **kw)
+                              read_mode=self.rmode_var.get(), wwl_hold=int(self.hold_var.get()),
+                              dep_path=1 if self.dep_var.get() == "BOT" else 0, **kw)
 
     # ── run ──
     def _start(self):
@@ -1118,7 +1143,7 @@ class FeArrayGUI:
         exps = cfg.get("experiments", [])
         if exps:
             e = exps[0]
-            d.update({k: v for k, v in e.items() if k in self.pvars or k in ("read_mode", "wwl_hold")})
+            d.update({k: v for k, v in e.items() if k in self.pvars or k in ("read_mode", "wwl_hold", "dep_path")})
             self.name_var.set(e.get("name", "exp"))
             self.scen_var.set(e.get("scenario", "PD"))
             cells = {(r, c) for r in e.get("rows", []) for c in e.get("cols", [])}
@@ -1138,6 +1163,8 @@ class FeArrayGUI:
             self.rmode_var.set(str(d["read_mode"]).upper())
         if "wwl_hold" in d:
             self.hold_var.set(bool(d["wwl_hold"]))
+        if "dep_path" in d:
+            self.dep_var.set("BOT" if int(d["dep_path"]) else "TOP")
         self._logln(t("YAML 불러옴: {fn}").format(fn=fn))
 
 
