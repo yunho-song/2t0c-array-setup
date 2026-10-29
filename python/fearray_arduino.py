@@ -30,7 +30,7 @@ NUM_CH = 5
 CAP_F = 6000e-12          # integrator cap per column (measured 6 nF, 2026-10-29; was 3 nF in older GUI)
 ADC_VREF = 3.3
 ADC_FULL = 4095
-ADC_DIV = 4
+ADC_DIV = 1              # firmware Rev2.1 sends full 12-bit (0..4095); older firmware sent raw/4 -> set 4
 RWL_PERIOD_US = 100
 
 

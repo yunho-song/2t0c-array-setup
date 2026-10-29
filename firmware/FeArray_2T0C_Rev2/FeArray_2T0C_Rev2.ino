@@ -78,7 +78,7 @@
  *          set   : set index (0 = initial read)
  *          phase : I (initial) | P | D | R
  *          pulse : cumulative pulse count within the phase (0 for initial / R)
- *          row   : 0..4 ;  ADCc = cell (row, c) value, 0..1023 (raw12bit/4)
+ *          row   : 0..4 ;  ADCc = cell (row, c) value, 0..4095 (full 12-bit; Rev2.1 — was raw/4 = 0..1023)
  *      ABORT> scenario aborted by host (send a single '!' byte at any time)
  *      EOD>   end of scenario
  *      ERR,...>  parse / argument error
@@ -274,7 +274,7 @@ void readRow(int row, int *out) {
   int n = g.avg_count > 0 ? g.avg_count : 1;
   for (int a = 0; a < n; a++)
     for (int c = 0; c < 5; c++) sum[c] += ADC->ADC_CDR[ADC_CH[c]];
-  for (int c = 0; c < 5; c++) out[c] = (int)((sum[c] / n) / 4);
+  for (int c = 0; c < 5; c++) out[c] = (int)(sum[c] / n);        // full 12-bit (0..4095); host CAP/ADC_DIV=1
 
   CR_CLR();             // clear integrator cap
   delay(CAP_CLEAR_MS);
