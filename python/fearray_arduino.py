@@ -147,9 +147,22 @@ class FeArrayArduino:
         self.aborted = True
 
     def send(self, cmd: str) -> None:
-        self.ser.reset_input_buffer()
-        self.ser.write(cmd.encode("ascii"))
-        self.ser.flush()
+        try:
+            self.ser.reset_input_buffer()
+            self.ser.write(cmd.encode("ascii"))
+            self.ser.flush()
+        except (serial.SerialException, OSError) as e:
+            # Windows: "WriteFile failed ... PermissionError(13, ...)" = the COM handle went stale
+            # (board re-enumerated after a re-plug / IDE upload / sleep). Re-open once and retry.
+            print(f"[serial] write failed ({e}); re-opening {self.port} and retrying once")
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+            self.connect()
+            self.ser.reset_input_buffer()
+            self.ser.write(cmd.encode("ascii"))
+            self.ser.flush()
 
     def run(self, p: ScenarioParams, overall_timeout: Optional[float] = None,
             verbose: bool = False) -> Iterator[ReadRecord]:
