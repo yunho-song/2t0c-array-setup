@@ -55,7 +55,13 @@
  *                                        N1 ON -> pre -> N2 LOW -> dep_pw -> N2 HIGH -> zero -> N1 OFF -> post
  *                                        Requires the host to switch rails between P and D (split voltages):
  *                                        D phase WBL_PROG = 0, WBL_OFF = -V.  Unselected rows stay at 0 V.
- *  23  extra7        (reserved)
+ *                               3 = TOPRD (2T0C, low WTR stress): like TOP (N2 LOW, WBL = WBL_OFF = -V between
+ *                                        pulses, erase = WWL pulse) but every map read first opens the WTRs
+ *                                        (N1ALL/N1SEL) and then raises N2 so the gates are read at WBL_PROG (0 V).
+ *                                        Needs read_mode N1ALL or N1SEL and D phase WBL_PROG = 0.
+ *  23  extra7        rwl_assist : 1 = during each PROGRAM pulse latch the selected rows' RWL HIGH (= VREAD,
+ *                                     negative) so the FeFET sees Vgs = V_SN - VREAD without raising any WTR voltage.
+ *                                     Sequence: N1 ON -> pre -> RWL=VREAD -> N2 ON -> pw -> N2 OFF -> RWL=VINP -> zero -> N1 OFF
  *
  *  Scenarios N2HI / N2LO: no pulses, no read. Set the N2 rest state (all rows) and reply EOD>.
  *  The host uses them with dep_path=2 so that WBL never leaves 0 V while PSU rails are re-programmed:
@@ -135,6 +141,7 @@ struct Params {
   int read_wait_ms;
   int phase_gap_ms;
   int dep_path;
+  int rwl_assist;
 };
 Params g;
 int adc_row[5];
@@ -161,6 +168,7 @@ uint32_t maskToPins(int mask, const uint32_t *table) {
 }
 
 uint32_t g_n2_rest = 0;                 // N2 bits held HIGH between pulses / during reads (0 or N2_ALL)
+bool g_rd_n2hi = false;                 // TOPRD: raise N2 (WBL -> WBL_PROG rail = 0 V) only while reading, after the WTRs are on
 void n2Rest() { PIOC->PIO_CODR = N2_ALL & ~g_n2_rest; PIOC->PIO_SODR = g_n2_rest; }
 
 void allLinesOff() {                     // keeps the N2 rest state (TOPINV: WBL stays on the 0 V rail between commands)
@@ -173,14 +181,23 @@ void allLinesOff() {                     // keeps the N2 rest state (TOPINV: WBL
 // Program: WBL = V_prog pulse while WWL ON.  (FE mode of Rev1.0)
 //   wwl_hold=0 : N1 ON -> pre -> N2 ON -> pw -> N2 OFF -> zero -> N1 OFF -> post
 //   wwl_hold=1 : N1 assumed already ON (caller holds it) -> N2 ON -> pw -> N2 OFF -> zero
-void programPulse(uint32_t n1, uint32_t n2) {
+// RWL is driven through a DFF: put the level on the row pins, clock once, release the pins (Q holds).
+void rwlLatch(uint32_t wl, bool high) {
+  if (high) PIOD->PIO_SODR = wl; else PIOD->PIO_CODR = WL_ALL;
+  CK_SET(); CK_CLR();
+  PIOD->PIO_CODR = WL_ALL;
+}
+
+void programPulse(uint32_t n1, uint32_t n2, uint32_t wl) {   // wl = selected rows RWL bits (rwl_assist)
   if (!g.wwl_hold) {
     PIOC->PIO_SODR = n1;
     udelay(g.pre_en);
   }
+  if (g.rwl_assist && wl) { DS_SET(); rwlLatch(wl, true); }   // selected rows' RWL -> VREAD (FeFET source down)
   PIOC->PIO_SODR = n2;
   udelay(g.pot_pw);
   PIOC->PIO_CODR = n2;
+  if (g.rwl_assist && wl) { rwlLatch(wl, false); DS_CLR(); }  // RWL back to VINP
   udelay(g.zero_t);          // gate -> V_WBL_OFF through WTR
   if (!g.wwl_hold) {
     PIOC->PIO_CODR = n1;
@@ -279,6 +296,8 @@ void readMap(int set, char phase, int pulse) {
     PIOC->PIO_SODR = n1_read;
     udelay(g.read_set_time);
   }
+  bool rd_hi = g_rd_n2hi && n1_read;       // TOPRD: gates are tied first, then WBL goes -V -> 0 V (no WTR over-stress)
+  if (rd_hi) { PIOC->PIO_SODR = N2_ALL; udelay(g.read_set_time); }
 
   for (int r = 0; r < 5 && !checkAbort(); r++) {
     readRow(r, adc_row);
@@ -290,6 +309,7 @@ void readMap(int set, char phase, int pulse) {
     Serial.println('>');
   }
 
+  if (rd_hi) { PIOC->PIO_CODR = N2_ALL; udelay(g.read_set_time); }   // WBL back to -V while gates still tied
   if (n1_read) {
     uint32_t keep = held ? maskToPins(g.col_mask, N1_PIN) : 0;
     PIOC->PIO_CODR = (n1_read & ~keep);
@@ -300,14 +320,16 @@ void readMap(int set, char phase, int pulse) {
 void runProgramPhase(int set) {
   uint32_t n1 = maskToPins(g.col_mask, N1_PIN);
   uint32_t n2 = maskToPins(g.row_mask, N2_PIN);
+  uint32_t wl = maskToPins(g.row_mask, WL_PIN);
   g_n2_rest = 0;                           // program phase: rest = N2 LOW (WBL = WBL_OFF)
+  g_rd_n2hi = false;
   n2Rest();
   if (g.wwl_hold) {                        // old FE mode: hold selected WWL ON
     PIOC->PIO_SODR = n1;
     udelay(g.read_set_time);
   }
   for (int k = 0; k < g.pot_num && !checkAbort(); k++) {
-    programPulse(n1, n2);
+    programPulse(n1, n2, wl);
     if (g.read_interval > 0 && ((k + 1) % g.read_interval == 0))
       readMap(set, 'P', k + 1);
   }
@@ -320,6 +342,7 @@ void runErasePhase(int set) {
   uint32_t uden = maskToPins(g.col_mask, UDEN_PIN);
   uint32_t n2 = maskToPins(g.row_mask, N2_PIN);
   g_n2_rest = (g.dep_path == 2) ? N2_ALL : 0;   // TOPINV: WBL rests on the WBL_PROG rail (0 V)
+  g_rd_n2hi = (g.dep_path == 3);               // TOPRD: WBL rests at WBL_OFF (-V), 0 V only while reading
   n2Rest();
   for (int k = 0; k < g.dep_num && !checkAbort(); k++) {
     if (g.dep_path == 1)      erasePulseBot(ud, uden);
@@ -370,7 +393,8 @@ bool parseSerial(Params &p) {
   p.wwl_hold     = (int)p.extra[1] ? 1 : 0;
   p.read_wait_ms = (int)p.extra[2];
   p.phase_gap_ms = (int)p.extra[5];
-  p.dep_path     = (int)p.extra[6]; if (p.dep_path < 0 || p.dep_path > 2) p.dep_path = 0;
+  p.dep_path     = (int)p.extra[6]; if (p.dep_path < 0 || p.dep_path > 3) p.dep_path = 0;
+  p.rwl_assist   = (int)p.extra[7] ? 1 : 0;
   if (p.read_mode != "N1ALL" && p.read_mode != "N1SEL") p.read_mode = "N1OFF";
   return true;
 }
@@ -399,6 +423,7 @@ void loop() {
   if (s == "N2HI")      g_n2_rest = N2_ALL;
   else if (s == "N2LO") g_n2_rest = 0;
   else g_n2_rest = (g.dep_path == 2 && (s == "D" || s == "DP" || s == "DBGD" || s == "LOOPD")) ? N2_ALL : 0;
+  g_rd_n2hi = (g.dep_path == 3 && (s == "D" || s == "DP" || s == "DBGD" || s == "LOOPD"));
   allLinesOff();
   FB_CLR(); HLCHOP_CLR();
 
@@ -435,12 +460,13 @@ void loop() {
     uint32_t n2 = maskToPins(g.row_mask, N2_PIN);
     uint32_t ud = maskToPins(g.row_mask, UD_PIN);
     uint32_t uden = maskToPins(g.col_mask, UDEN_PIN);
+    uint32_t wl = maskToPins(g.row_mask, WL_PIN);
     int row = 0; for (int r = 0; r < 5; r++) if (g.row_mask & (1 << r)) { row = r; break; }
     n2Rest();
     if (s == "LOOPP" && g.wwl_hold) PIOC->PIO_SODR = n1;
     Serial.println("LOOP>");
     while (!checkAbort()) {
-      if (s == "LOOPP")      programPulse(n1, n2);
+      if (s == "LOOPP")      programPulse(n1, n2, wl);
       else if (s == "LOOPD") {
         if (g.dep_path == 1)      erasePulseBot(ud, uden);
         else if (g.dep_path == 2) erasePulseInv(n1, n2);

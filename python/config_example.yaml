@@ -65,7 +65,12 @@ defaults:
   dep_path: 0          # 0 = TOP    (2T0C: WWL pulse, WBL sits at WBL_OFF DC for the whole D phase; use phase_voltages)
                        # 2 = TOPINV (2T0C: WBL rests at 0 V = D-phase WBL_PROG rail, pulsed to WBL_OFF only while WWL is open.
                        #             Needs phase_voltages D: {WBL_PROG: 0.0, WBL_OFF: -3.0}. Less stress / disturb than TOP)
+                       # 3 = TOPRD  (2T0C, lowest WTR stress: WBL rests at WBL_OFF = -V like TOP, but each read ties the gates
+                       #             (needs read_mode N1ALL/N1SEL) and raises N2 so the gate is read at WBL_PROG = 0 V.
+                       #             phase_voltages D: {WBL_PROG: 0.0, WBL_OFF: -3.0, WWL_ON: 0.5, WWL_OFF: -4.5})
                        # 1 = BOT    (4T0C bottom path only)
+  rwl_assist: 0        # 1 = during each P pulse the selected rows' RWL is latched to VREAD (negative) -> FeFET Vgs = V_SN - VREAD
+                       #     (adds |VREAD| to the program voltage with no extra WTR stress; VREAD is also the read bias)
 
 # ── Experiments (run in order). Any defaults/voltages key can be overridden. ──
 experiments:

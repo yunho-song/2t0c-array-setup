@@ -127,12 +127,14 @@ def setup_fonts(root) -> bool:
     return _UI_KO
 
 
-DEP_PATH = {"TOP": 0, "TOPINV": 2, "BOT": 1}          # combobox label -> firmware dep_path
+DEP_PATH = {"TOP": 0, "TOPINV": 2, "TOPRD": 3, "BOT": 1}   # combobox label -> firmware dep_path
 DEP_LABEL = {v: k for k, v in DEP_PATH.items()}
 
 _EN.update({
     'TOP: WBL=D열 WBL_OFF(음수) DC, WWL 펄스  /  TOPINV: WBL은 D열 WBL_PROG(=0 V)에 휴지, WWL 열린 동안만 D열 WBL_OFF(음수, 값 자유) 펄스  /  BOT: 4T0C 하단 경로': 'TOP: WBL = D-column WBL_OFF (negative) DC, WWL pulse / TOPINV: WBL rests at D-column WBL_PROG (=0 V), pulsed to D-column WBL_OFF (negative, any value) only while WWL is open / BOT: 4T0C bottom path',
-    'TOP=DC  TOPINV=펄스  BOT=4T0C': 'TOP=DC  TOPINV=pulsed  BOT=4T0C',
+    'TOP=DC  TOPINV=펄스  TOPRD=DC+0V read  BOT=4T0C': 'TOP=DC  TOPINV=pulsed  TOPRD=DC+0V read  BOT=4T0C',
+    'P 펄스 중 RWL=VREAD (FeFET Vgs 보조)': 'RWL=VREAD during P pulses (FeFET Vgs assist)',
+    '경고: TOPRD는 Read 중 WWL = N1ALL/N1SEL 이어야 합니다 (N1OFF면 read가 WBL_OFF 레벨에서 수행됨)': 'WARNING: TOPRD needs read mode N1ALL/N1SEL (with N1OFF reads happen at the WBL_OFF level)',
     '경고: TOPINV는 D열 WBL_PROG가 WBL 휴지 레벨 → 0 V로 두세요 (현재 {v:g} V)': 'WARNING: in TOPINV the D-column WBL_PROG is the WBL rest level -> set it to 0 V (now {v:g} V)',
     '경고: TOPINV는 P/D 분리 전압이 필요합니다 (D열 WBL_PROG=0, WBL_OFF=음수)': 'WARNING: TOPINV needs split P/D voltages (D column: WBL_PROG=0, WBL_OFF negative)',
     '경고: D phase의 WBL_OFF가 0 V 이상 → depression 전압이 걸리지 않음. \'P/D phase에 다른 전압\' 체크 후 D열 WBL_OFF에 음수 입력': 'WARNING: WBL_OFF in D phase is >= 0 V -> no depression voltage. Tick split voltages and enter a negative WBL_OFF in the D column',
@@ -374,7 +376,12 @@ class FeArrayGUI:
         cb_dep = ttk.Combobox(f, textvariable=self.dep_var, values=list(DEP_PATH), width=7, state="readonly")
         cb_dep.grid(row=r, column=1, sticky="w")
         cb_dep.bind("<Enter>", lambda _e: self._status(t("TOP: WBL=D열 WBL_OFF(음수) DC, WWL 펄스  /  TOPINV: WBL은 D열 WBL_PROG(=0 V)에 휴지, WWL 열린 동안만 D열 WBL_OFF(음수, 값 자유) 펄스  /  BOT: 4T0C 하단 경로")))
-        ttk.Label(f, text=t("TOP=DC  TOPINV=펄스  BOT=4T0C"), foreground="gray").grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
+        ttk.Label(f, text=t("TOP=DC  TOPINV=펄스  TOPRD=DC+0V read  BOT=4T0C"), foreground="gray").grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
+        r += 1
+        self.rwl_var = tk.BooleanVar(value=False)
+        cb_rwl = ttk.Checkbutton(f, text=t("P 펄스 중 RWL=VREAD (FeFET Vgs 보조)"), variable=self.rwl_var)
+        cb_rwl.grid(row=r, column=0, columnspan=4, sticky="w")
+        cb_rwl.bind("<Enter>", lambda _e: self._status("P 펄스 동안 선택 row의 RWL을 VREAD(음수)로 내려 FeFET Vgs = V_SN − VREAD. WTR 전압은 그대로. read 바이어스도 같은 VREAD rail."))
 
         ttk.Label(f, text=t("저장 폴더")).grid(row=r + 1, column=0, sticky="w")
         self.out_var = tk.StringVar(value=os.path.join(HERE, "data"))
@@ -527,6 +534,7 @@ class FeArrayGUI:
             v.trace_add("write", lambda *_: self._schedule_wave())
         self.hold_var.trace_add("write", lambda *_: self._schedule_wave())
         self.dep_var.trace_add("write", lambda *_: self._schedule_wave())
+        self.rwl_var.trace_add("write", lambda *_: self._schedule_wave())
         self._draw_waveforms()
 
     def _schedule_wave(self):
@@ -601,8 +609,12 @@ class FeArrayGUI:
         n1 = [(gap, 1 if hold else 0), (wl[0], 1), (wl[1], 1), (wl[2], 1), (wl[3], 1 if hold else 0), (gap, 1 if hold else 0)]
         n2 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
         sn = [(gap, 0.3 if hold else 0.15), (wl[0], 0.3), (wl[1], 1), (wl[2], 0.3), (wl[3], 0.3 if hold else 0.15), (gap, 0.3 if hold else 0.15)]
-        draw(axes[0], f"PROGRAM pulse ×1  (scenario P / PD)   segment labels = GUI fields [µs]" + (f"    [{t('P 중 WWL 유지')}]" if hold else ""),
-             ["N1", "N2", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
+        sigs, data = ["N1", "N2", "SN"], {"N1": n1, "N2": n2, "SN": sn}
+        if self.rwl_var.get():
+            NAME["RWL"] = "RWL (sel row)"
+            data["RWL"] = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]; sigs.append("RWL")
+        draw(axes[0], f"PROGRAM pulse ×1  (scenario P / PD)   segment labels = GUI fields [µs]" + (f"    [{t('P 중 WWL 유지')}]" if hold else "") + ("   RWL=VREAD during pulse → FeFET Vgs = V_SN − VREAD" if self.rwl_var.get() else ""),
+             sigs, data, labs)
         axes[0].text(0.0, -0.04, MAP_W, transform=axes[0].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         # ── Erase ──
         if self.dep_var.get() == "BOT":
@@ -629,12 +641,14 @@ class FeArrayGUI:
                  ["N2", "N1", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
             axes[1].text(0.0, -0.04, MAP_W, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         else:
+            toprd = self.dep_var.get() == "TOPRD"
             wl = [W(pre), W(dpw), W(post), W(zero)]
             labs = [(gap, "N2 OFF"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['post_en']}\n= {post:g}"), (wl[3], f"{L['zero_t']}\n= {zero:g}"), (gap, "")]
             n2 = [(gap, 0), (wl[0], 0), (wl[1], 0), (wl[2], 0), (wl[3], 0), (gap, 0)]
             n1 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
             sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.15), (wl[3], 0.15), (gap, 0.15)]
-            draw(axes[1], f"ERASE pulse ×1  (dep_path=TOP)   N2 stays LOW → WBL = WBL_OFF {v['WBL_OFF']:g} V, N1 pulse pulls SN to it",
+            draw(axes[1], (f"ERASE pulse ×1  (dep_path=TOPRD)   N2 LOW between pulses → WBL = WBL_OFF(D);  each read: N1 on → N2 HIGH (WBL = WBL_PROG(D) = 0 V) → read → N2 LOW → N1 off" if toprd else
+                           f"ERASE pulse ×1  (dep_path=TOP)   N2 stays LOW → WBL = WBL_OFF {v['WBL_OFF']:g} V, N1 pulse pulls SN to it"),
                  ["N2", "N1", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
             axes[1].text(0.0, -0.04, MAP_W, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         # ── Read (one row) ──
@@ -876,7 +890,7 @@ class FeArrayGUI:
             kw[key] = float(s) if key == "r_interval_s" else int(float(s))
         return ScenarioParams(scenario=self.scen_var.get(), rows=rows, cols=cols,
                               read_mode=self.rmode_var.get(), wwl_hold=int(self.hold_var.get()),
-                              dep_path=DEP_PATH.get(self.dep_var.get(), 0), **kw)
+                              dep_path=DEP_PATH.get(self.dep_var.get(), 0), rwl_assist=int(self.rwl_var.get()), **kw)
 
     # ── run ──
     def _start(self):
@@ -903,7 +917,9 @@ class FeArrayGUI:
             d_off = vD.get("WBL_OFF", 0.0)
             if d_off >= 0:
                 self._logln(t("경고: D phase의 WBL_OFF가 0 V 이상 → depression 전압이 걸리지 않음. 'P/D phase에 다른 전압' 체크 후 D열 WBL_OFF에 음수 입력"))
-            if p.dep_path == 2:
+            if p.dep_path == 3 and p.read_mode == "N1OFF":
+                self._logln(t("경고: TOPRD는 Read 중 WWL = N1ALL/N1SEL 이어야 합니다 (N1OFF면 read가 WBL_OFF 레벨에서 수행됨)"))
+            if p.dep_path in (2, 3):
                 if not use_cols:
                     self._logln(t("경고: TOPINV는 P/D 분리 전압이 필요합니다 (D열 WBL_PROG=0, WBL_OFF=음수)"))
                 elif abs(vD.get("WBL_PROG", 0.0)) > 1e-6:
@@ -944,6 +960,10 @@ class FeArrayGUI:
                 if first in v:
                     written += self.psu.apply({first: float(v.pop(first))})
                 n2("N2HI" if phase == "D" else "N2LO")              # WBL -> the 0 V rail
+            elif p.dep_path == 3 and phase == "P" and "WBL_OFF" in v:
+                # TOPRD D->P: raise WBL_OFF (-V -> 0) BEFORE WWL_OFF comes up, otherwise the WTRs turn on
+                # for a moment with WBL still at -V and every SN gets pulled down
+                written += self.psu.apply({"WBL_OFF": float(v.pop("WBL_OFF"))})
             written += self.psu.apply(v)           # only rails whose value changed are re-written
             if not written:
                 self.q.put(("log", f"PSU unchanged {v}"))
@@ -1203,7 +1223,7 @@ class FeArrayGUI:
         exps = cfg.get("experiments", [])
         if exps:
             e = exps[0]
-            d.update({k: v for k, v in e.items() if k in self.pvars or k in ("read_mode", "wwl_hold", "dep_path")})
+            d.update({k: v for k, v in e.items() if k in self.pvars or k in ("read_mode", "wwl_hold", "dep_path", "rwl_assist")})
             self.name_var.set(e.get("name", "exp"))
             self.scen_var.set(e.get("scenario", "PD"))
             cells = {(r, c) for r in e.get("rows", []) for c in e.get("cols", [])}
@@ -1225,6 +1245,8 @@ class FeArrayGUI:
             self.hold_var.set(bool(d["wwl_hold"]))
         if "dep_path" in d:
             self.dep_var.set(DEP_LABEL.get(int(d["dep_path"]), "TOP"))
+        if "rwl_assist" in d:
+            self.rwl_var.set(bool(int(d["rwl_assist"])))
         self._logln(t("YAML 불러옴: {fn}").format(fn=fn))
 
 

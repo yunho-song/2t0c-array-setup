@@ -78,6 +78,10 @@ class ScenarioParams:
     dep_path: int = 0               # 0 = TOP (WWL pulse, WBL at WBL_OFF DC)  1 = BOT (4T0C UD/UDEN path)
                                     # 2 = TOPINV (WBL pulsed: N2 rests HIGH = WBL_PROG rail (0 V in D phase),
                                     #     pulsed LOW = WBL_OFF (-V) only while WWL is open; needs split voltages)
+                                    # 3 = TOPRD (WBL rests at WBL_OFF = -V like TOP; each read ties the gates (N1ALL/N1SEL)
+                                    #     and raises N2 so reads happen at WBL_PROG = 0 V; lowest WTR stress)
+    rwl_assist: int = 0             # 1 = during PROGRAM pulses latch the selected rows' RWL to VREAD (negative):
+                                    #     FeFET Vgs = V_SN - VREAD, no extra WTR stress
 
     def to_command(self) -> str:
         f = [self.scenario, mask(self.rows), mask(self.cols),
@@ -86,7 +90,7 @@ class ScenarioParams:
              self.read_time, self.read_set_time, self.read_delay, self.read_interval,
              self.read_mode.upper(),
              self.avg_count, self.wwl_hold, self.read_wait_ms,
-             self.r_interval_s, self.r_points, self.phase_gap_ms, self.dep_path, 0]
+             self.r_interval_s, self.r_points, self.phase_gap_ms, self.dep_path, self.rwl_assist]
         return ",".join(str(x) for x in f) + "|"
 
     def expected_reads(self) -> int:
