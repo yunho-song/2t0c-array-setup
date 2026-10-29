@@ -141,7 +141,7 @@ _EN.update({
     'D 경로': 'D path', 'TOP=2T0C  BOT=4T0C': 'TOP=2T0C  BOT=4T0C', 'TOP(2T0C): WWL 펄스, 게이트=WBL_OFF → D phase에 WBL_OFF=−3 (P/D 분리 전압)  /  BOT: 4T0C용 하단 경로': 'TOP (2T0C): WWL pulse, gate=WBL_OFF -> set WBL_OFF=-3 in D phase (split voltages) / BOT: 4T0C bottom path', 'Rest 레벨 (N2 LOW). TOP 경로 erase 레벨 겸함': 'rest level (N2 LOW); also TOP-path erase level', 'Depression 레벨 (UD on, 하단 경로, 음수)': 'depression level (UD on, bottom path, negative)', '하단 경로 off 레벨 (0 V)': 'bottom path off level (0 V)',
     '  셀별 그래프 (5×5)  ': '  Per-cell plots (5x5)  ', 'Y축 공통 (셀 간 비교)': 'shared Y axis', '주황 = 선택 셀, 제목 = (row,col) 마지막 ADC': 'orange = selected cell, title = (row,col) last ADC',
     '보기': 'View', '한 그래프 (선택=색, 비선택=회색)': 'one plot (selected=color, others=gray)', '선택 셀만': 'selected cells only', 'row별 5개 그래프': '5 plots (per row)', '5×5 격자 (셀마다)': '5x5 grid (per cell)', '맵 표시': 'show map',
-    '보드 아날로그 전원': 'board analog supply',
+    '보드 아날로그 전원': 'board analog supply', '반전': 'neg', '반전 배선 = PSU 채널 \'+\'를 GND에, \'−\'를 rail에 (음수 전용). 체크 해제 = 정배선 (양수 전용). 실제 배선과 맞출 것: {r}': 'negative wiring = channel + to GND, - to rail (negative values only). Unchecked = normal wiring (positive only). Must match the bench: {r}',
     'WTR gate OFF (N1 LOW, 음수)': 'WTR gate OFF (N1 LOW, negative)',
     'Program 레벨 (N2 HIGH)': 'Program level (N2 HIGH)',
     'Erase / read-write 레벨 (N2 LOW)': 'Erase / read-write level (N2 LOW)',
@@ -439,10 +439,17 @@ class FeArrayGUI:
         ttk.Label(f, text=t("기본")).grid(row=1, column=1)
         self.vP_hdr = ttk.Label(f, text="P phase"); self.vP_hdr.grid(row=1, column=2)
         self.vD_hdr = ttk.Label(f, text="D phase"); self.vD_hdr.grid(row=1, column=3)
+        ttk.Label(f, text=t("반전")).grid(row=1, column=4)
         self.vvars: Dict[str, Dict[str, tk.StringVar]] = {"base": {}, "P": {}, "D": {}}
         self.v_entries: Dict[str, List[ttk.Entry]] = {"P": [], "D": []}
+        self.neg_vars: Dict[str, tk.BooleanVar] = {}
         for i, rail in enumerate(RAILS):
             ttk.Label(f, text=rail).grid(row=2 + i, column=0, sticky="w")
+            nv = tk.BooleanVar(value=bool(DEFAULT_RAILS[rail]["negative"]))
+            self.neg_vars[rail] = nv
+            cbn = ttk.Checkbutton(f, variable=nv, command=lambda r=rail: self._neg_changed(r))
+            cbn.grid(row=2 + i, column=4, padx=(6, 0))
+            cbn.bind("<Enter>", lambda _e, r=rail: self._status(t("반전 배선 = PSU 채널 '+'를 GND에, '−'를 rail에 (음수 전용). 체크 해제 = 정배선 (양수 전용). 실제 배선과 맞출 것: {r}").format(r=f"{r} → PSU{DEFAULT_RAILS[r]['psu']} CH{DEFAULT_RAILS[r]['ch']}")))
             for j, ph in enumerate(("base", "P", "D")):
                 v = tk.StringVar(value=str(DEFAULT_V[rail]) if ph == "base" else "")
                 self.vvars[ph][rail] = v
@@ -796,9 +803,19 @@ class FeArrayGUI:
             out[rail] = float(s)
         return out
 
+    def _rails_cfg(self):
+        """DEFAULT_RAILS with the polarity checkboxes applied (wiring can be swapped per experiment)."""
+        return {n: dict(r, negative=bool(self.neg_vars[n].get())) if n in self.neg_vars else dict(r)
+                for n, r in DEFAULT_RAILS.items()}
+
+    def _neg_changed(self, rail):
+        if self.psu is not None and rail in self.psu.rails:
+            self.psu.rails[rail]["negative"] = bool(self.neg_vars[rail].get())
+            self._logln(f"{rail}: {'negative (반전 배선)' if self.neg_vars[rail].get() else 'positive (정배선)'} — PSU{DEFAULT_RAILS[rail]['psu']} CH{DEFAULT_RAILS[rail]['ch']} 배선을 실제로 바꿨는지 확인")
+
     def _psu_cfg(self):
         # model per PSU is auto-detected from *IDN? (EDU36311A / 2230G); the rail map is the same for both
-        return {"resources": {pid: self._visa_resource(pid) for pid in PSU_IDS}, "rails": DEFAULT_RAILS}
+        return {"resources": {pid: self._visa_resource(pid) for pid in PSU_IDS}, "rails": self._rails_cfg()}
 
     def _apply_v(self, phase):
         if self.psu is None:
@@ -1247,6 +1264,9 @@ class FeArrayGUI:
             self.dep_var.set(DEP_LABEL.get(int(d["dep_path"]), "TOP"))
         if "rwl_assist" in d:
             self.rwl_var.set(bool(int(d["rwl_assist"])))
+        for n, r in (cfg.get("psu", {}).get("rails", {}) or {}).items():
+            if n in self.neg_vars and "negative" in r:
+                self.neg_vars[n].set(bool(r["negative"])); self._neg_changed(n)
         self._logln(t("YAML 불러옴: {fn}").format(fn=fn))
 
 
