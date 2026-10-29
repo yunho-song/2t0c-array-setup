@@ -142,7 +142,7 @@ CH1은 6 V 제한이므로 큰 전압은 CH2/CH3에 배정. 보드용 PSU 3호�
 ## 데이터
 
 `data.csv` (long): `read_idx,t_s,set,phase,pulse,row,col,selected,adc,I_uA`
-`I_uA = C·V_cap/t_int`, C=3000 pF, V_cap=adc·4/4095·3.3, t_int=read_time·100 µs (기존 GUI와 동일)
+`I_uA = C·V_cap/t_int`, C=6000 pF (6 nF, 2026-10-29 확인), V_cap=adc·4/4095·3.3, t_int=read_time·100 µs (기존 GUI와 동일)
 `plot.png`: 선택 셀(색) vs 비선택 24셀(회색) 추이 + final 맵 + final−initial 맵 (빨간 테두리 = 선택 셀)
 
 ## 확인/주의

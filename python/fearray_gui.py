@@ -40,7 +40,7 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from fearray_arduino import FeArrayArduino, ScenarioParams, ReadRecord, NUM_CH   # noqa: E402
+from fearray_arduino import FeArrayArduino, ScenarioParams, ReadRecord, NUM_CH, CAP_F   # noqa: E402
 from fearray_measure import ExperimentWriter                                       # noqa: E402
 from psu_macro_2T0C import DEFAULT_RAILS, DEFAULT_ON_ORDER                          # noqa: E402
 
@@ -645,7 +645,7 @@ class FeArrayGUI:
         cr = [(wl[0], 0), (wl[1], 1), (wl[2], 1), (wl[3], 1), (1.3, 1), (wl[5], 0)]
         rwl = [(wl[0], 0), (wl[1], 0), (wl[2], 1), (wl[3], 0), (1.3, 0), (wl[5], 0)]
         vc = [(wl[0], 0), (wl[1], 0), (wl[2], (0, 0.8)), (wl[3], 0.8), (1.3, 0.8), (wl[5], (0.8, 0))]
-        draw(axes[2], f"READ one row (5 cols at once)   {t('Read 중 WWL')} = {rmode}   1 ADC count ≈ {3000e-12*4/4095*3.3/(tint*1e-6)*1e9:.2f} nA",
+        draw(axes[2], f"READ one row (5 cols at once)   {t('Read 중 WWL')} = {rmode}   1 ADC count ≈ {CAP_F*4/4095*3.3/(tint*1e-6)*1e9:.2f} nA (C={CAP_F*1e9:g} nF)",
              ["CON", "CR", "RWL", "Vcap"], {"CON": con, "CR": cr, "RWL": rwl, "Vcap": vc}, labs)
         axes[2].text(0.0, -0.04, MAP_R, transform=axes[2].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         axes[2].text(0.0, -0.3, "Vcap slope ∝ I_RBL (FeFET state).   x-axis is log-compressed (not to scale).  Segment labels = GUI field names.",

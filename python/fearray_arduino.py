@@ -27,7 +27,7 @@ BAUD = 115200
 NUM_CH = 5
 
 # ── current back-calculation (same constants as fefet_measure.py) ─────
-CAP_F = 3000e-12
+CAP_F = 6000e-12          # integrator cap per column (measured 6 nF, 2026-10-29; was 3 nF in older GUI)
 ADC_VREF = 3.3
 ADC_FULL = 4095
 ADC_DIV = 4
