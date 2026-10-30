@@ -30,14 +30,14 @@ NUM_CH = 5
 CAP_F = 6000e-12          # integrator cap per column (measured 6 nF, 2026-10-29; was 3 nF in older GUI)
 ADC_VREF = 3.3
 ADC_FULL = 4095
-ADC_DIV = 1              # firmware Rev2.1 sends full 12-bit (0..4095); older firmware sent raw/4 -> set 4
+ADC_DIV = 4              # default scale: firmware divides the 12-bit sample by adc_div (4 -> 0..1023, 1 -> 0..4095)
 RWL_PERIOD_US = 100
 
 
-def adc_to_current_uA(adc_val: float, read_time: int) -> float:
+def adc_to_current_uA(adc_val: float, read_time: int, adc_div: int = ADC_DIV) -> float:
     if read_time <= 0:
         return 0.0
-    v_cap = (adc_val * ADC_DIV / ADC_FULL) * ADC_VREF
+    v_cap = (adc_val * adc_div / ADC_FULL) * ADC_VREF
     t_int = read_time * RWL_PERIOD_US * 1e-6
     return (CAP_F * v_cap / t_int) * 1e6
 
@@ -82,6 +82,7 @@ class ScenarioParams:
                                     #     and raises N2 so reads happen at WBL_PROG = 0 V; lowest WTR stress)
     rwl_assist: int = 0             # 1 = during PROGRAM pulses latch the selected rows' RWL to VREAD (negative):
                                     #     FeFET Vgs = V_SN - VREAD, no extra WTR stress
+    adc_div: int = 4                # ADC output scale: 4 = 0..1023 (default), 1 = full 12-bit 0..4095
 
     def to_command(self) -> str:
         f = [self.scenario, mask(self.rows), mask(self.cols),
@@ -90,7 +91,7 @@ class ScenarioParams:
              self.read_time, self.read_set_time, self.read_delay, self.read_interval,
              self.read_mode.upper(),
              self.avg_count, self.wwl_hold, self.read_wait_ms,
-             self.r_interval_s, self.r_points, self.phase_gap_ms, self.dep_path, self.rwl_assist]
+             self.r_interval_s, self.r_points, self.phase_gap_ms, self.dep_path, self.rwl_assist, self.adc_div]
         return ",".join(str(x) for x in f) + "|"
 
     def expected_reads(self) -> int:

@@ -101,7 +101,7 @@ class ExperimentWriter:
         for c, adc in enumerate(rec.adc):
             self._w.writerow([self.read_idx, f"{rec.t:.3f}", rec.set, rec.phase, rec.pulse,
                               rec.row, c, int((rec.row, c) in self.sel), adc,
-                              f"{adc_to_current_uA(adc, self.p.read_time):.5f}"])
+                              f"{adc_to_current_uA(adc, self.p.read_time, getattr(self.p, 'adc_div', 4)):.5f}"])
         self._f.flush()
 
     def maps(self):

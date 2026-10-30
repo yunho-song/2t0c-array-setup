@@ -40,7 +40,7 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from fearray_arduino import FeArrayArduino, ScenarioParams, ReadRecord, NUM_CH, CAP_F, ADC_DIV   # noqa: E402
+from fearray_arduino import FeArrayArduino, ScenarioParams, ReadRecord, NUM_CH, CAP_F   # noqa: E402
 from fearray_measure import ExperimentWriter                                       # noqa: E402
 from psu_macro_2T0C import DEFAULT_RAILS, DEFAULT_ON_ORDER                          # noqa: E402
 
@@ -164,6 +164,7 @@ _EN.update({
     'RWL 펄스 수 ×100 µs': 'RWL pulses ×100 µs',
     'N1ALL/N1SEL: WWL ON 후 안정화': 'N1ALL/N1SEL: settle after WWL ON',
     'Read 전 대기 [ms]': 'Pre-read wait [ms]',
+    'ADC 눈금': 'ADC scale', '1023=기존  4095=12비트 전부': '1023=legacy  4095=full 12-bit', '1023 = 12비트/4 (기존 눈금)   4095 = 12비트 전부 (분해능 4배, 포화점 동일). 저장되는 µA 환산은 자동으로 맞춤': '1023 = 12-bit/4 (legacy)   4095 = full 12-bit (4x resolution, same saturation). Saved uA conversion follows automatically',
     'ADC 평균': 'ADC avg',
     'cap 1회 충전, ADC n회 평균': 'one cap charge, n ADC samples',
     'P→D 대기 [ms]': 'P->D gap [ms]',
@@ -382,6 +383,13 @@ class FeArrayGUI:
         cb_rwl = ttk.Checkbutton(f, text=t("P 펄스 중 RWL=VREAD (FeFET Vgs 보조)"), variable=self.rwl_var)
         cb_rwl.grid(row=r, column=0, columnspan=4, sticky="w")
         cb_rwl.bind("<Enter>", lambda _e: self._status("P 펄스 동안 선택 row의 RWL을 VREAD(음수)로 내려 FeFET Vgs = V_SN − VREAD. WTR 전압은 그대로. read 바이어스도 같은 VREAD rail."))
+        r += 1
+        ttk.Label(f, text=t("ADC 눈금")).grid(row=r, column=0, sticky="w")
+        self.adc_var = tk.StringVar(value="1023")
+        cb_adc = ttk.Combobox(f, textvariable=self.adc_var, values=["1023", "4095"], width=7, state="readonly")
+        cb_adc.grid(row=r, column=1, sticky="w")
+        cb_adc.bind("<Enter>", lambda _e: self._status(t("1023 = 12비트/4 (기존 눈금)   4095 = 12비트 전부 (분해능 4배, 포화점 동일). 저장되는 µA 환산은 자동으로 맞춤")))
+        ttk.Label(f, text=t("1023=기존  4095=12비트 전부"), foreground="gray").grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
 
         ttk.Label(f, text=t("저장 폴더")).grid(row=r + 1, column=0, sticky="w")
         self.out_var = tk.StringVar(value=os.path.join(HERE, "data"))
@@ -542,6 +550,7 @@ class FeArrayGUI:
         self.hold_var.trace_add("write", lambda *_: self._schedule_wave())
         self.dep_var.trace_add("write", lambda *_: self._schedule_wave())
         self.rwl_var.trace_add("write", lambda *_: self._schedule_wave())
+        self.adc_var.trace_add("write", lambda *_: self._schedule_wave())
         self._draw_waveforms()
 
     def _schedule_wave(self):
@@ -666,7 +675,7 @@ class FeArrayGUI:
         cr = [(wl[0], 0), (wl[1], 1), (wl[2], 1), (wl[3], 1), (1.3, 1), (wl[5], 0)]
         rwl = [(wl[0], 0), (wl[1], 0), (wl[2], 1), (wl[3], 0), (1.3, 0), (wl[5], 0)]
         vc = [(wl[0], 0), (wl[1], 0), (wl[2], (0, 0.8)), (wl[3], 0.8), (1.3, 0.8), (wl[5], (0.8, 0))]
-        draw(axes[2], f"READ one row (5 cols at once)   {t('Read 중 WWL')} = {rmode}   1 ADC count ≈ {CAP_F*ADC_DIV/4095*3.3/(tint*1e-6)*1e9:.3f} nA, full scale {CAP_F*3.3/(tint*1e-6)*1e9:.0f} nA (C={CAP_F*1e9:g} nF, {4096//ADC_DIV} levels)",
+        draw(axes[2], f"READ one row (5 cols at once)   {t('Read 중 WWL')} = {rmode}   1 ADC count ≈ {CAP_F*(1 if self.adc_var.get()=='4095' else 4)/4095*3.3/(tint*1e-6)*1e9:.3f} nA, full scale {CAP_F*3.3/(tint*1e-6)*1e9:.0f} nA (C={CAP_F*1e9:g} nF, 0..{self.adc_var.get()})",
              ["CON", "CR", "RWL", "Vcap"], {"CON": con, "CR": cr, "RWL": rwl, "Vcap": vc}, labs)
         axes[2].text(0.0, -0.04, MAP_R, transform=axes[2].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         axes[2].text(0.0, -0.3, "Vcap slope ∝ I_RBL (FeFET state).   x-axis is log-compressed (not to scale).  Segment labels = GUI field names.",
@@ -907,7 +916,8 @@ class FeArrayGUI:
             kw[key] = float(s) if key == "r_interval_s" else int(float(s))
         return ScenarioParams(scenario=self.scen_var.get(), rows=rows, cols=cols,
                               read_mode=self.rmode_var.get(), wwl_hold=int(self.hold_var.get()),
-                              dep_path=DEP_PATH.get(self.dep_var.get(), 0), rwl_assist=int(self.rwl_var.get()), **kw)
+                              dep_path=DEP_PATH.get(self.dep_var.get(), 0), rwl_assist=int(self.rwl_var.get()),
+                              adc_div=1 if self.adc_var.get() == "4095" else 4, **kw)
 
     # ── run ──
     def _start(self):
@@ -1240,7 +1250,7 @@ class FeArrayGUI:
         exps = cfg.get("experiments", [])
         if exps:
             e = exps[0]
-            d.update({k: v for k, v in e.items() if k in self.pvars or k in ("read_mode", "wwl_hold", "dep_path", "rwl_assist")})
+            d.update({k: v for k, v in e.items() if k in self.pvars or k in ("read_mode", "wwl_hold", "dep_path", "rwl_assist", "adc_div")})
             self.name_var.set(e.get("name", "exp"))
             self.scen_var.set(e.get("scenario", "PD"))
             cells = {(r, c) for r in e.get("rows", []) for c in e.get("cols", [])}
@@ -1264,6 +1274,8 @@ class FeArrayGUI:
             self.dep_var.set(DEP_LABEL.get(int(d["dep_path"]), "TOP"))
         if "rwl_assist" in d:
             self.rwl_var.set(bool(int(d["rwl_assist"])))
+        if "adc_div" in d:
+            self.adc_var.set("4095" if int(d["adc_div"]) == 1 else "1023")
         for n, r in (cfg.get("psu", {}).get("rails", {}) or {}).items():
             if n in self.neg_vars and "negative" in r:
                 self.neg_vars[n].set(bool(r["negative"])); self._neg_changed(n)

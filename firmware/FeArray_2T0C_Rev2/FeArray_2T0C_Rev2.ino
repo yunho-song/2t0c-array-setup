@@ -62,6 +62,7 @@
  *  23  extra7        rwl_assist : 1 = during each PROGRAM pulse latch the selected rows' RWL HIGH (= VREAD,
  *                                     negative) so the FeFET sees Vgs = V_SN - VREAD without raising any WTR voltage.
  *                                     Sequence: N1 ON -> pre -> RWL=VREAD -> N2 ON -> pw -> N2 OFF -> RWL=VINP -> zero -> N1 OFF
+ *  24  extra8        adc_div    : ADC output divisor: 4 = 0..1023 (legacy scale, default), 1 = full 12-bit 0..4095
  *
  *  Scenarios N2HI / N2LO: no pulses, no read. Set the N2 rest state (all rows) and reply EOD>.
  *  The host uses them with dep_path=2 so that WBL never leaves 0 V while PSU rails are re-programmed:
@@ -78,7 +79,7 @@
  *          set   : set index (0 = initial read)
  *          phase : I (initial) | P | D | R
  *          pulse : cumulative pulse count within the phase (0 for initial / R)
- *          row   : 0..4 ;  ADCc = cell (row, c) value, 0..4095 (full 12-bit; Rev2.1 — was raw/4 = 0..1023)
+ *          row   : 0..4 ;  ADCc = cell (row, c) value, raw12bit / adc_div  (adc_div 4 -> 0..1023, 1 -> 0..4095)
  *      ABORT> scenario aborted by host (send a single '!' byte at any time)
  *      EOD>   end of scenario
  *      ERR,...>  parse / argument error
@@ -134,7 +135,7 @@ struct Params {
   int pre_en, post_en, zero_t;
   int read_time, read_set_time, read_delay, read_interval;
   String read_mode;
-  double extra[8];
+  double extra[9];
   // derived
   int avg_count;
   int wwl_hold;
@@ -142,6 +143,7 @@ struct Params {
   int phase_gap_ms;
   int dep_path;
   int rwl_assist;
+  int adc_div;
 };
 Params g;
 int adc_row[5];
@@ -274,7 +276,7 @@ void readRow(int row, int *out) {
   int n = g.avg_count > 0 ? g.avg_count : 1;
   for (int a = 0; a < n; a++)
     for (int c = 0; c < 5; c++) sum[c] += ADC->ADC_CDR[ADC_CH[c]];
-  for (int c = 0; c < 5; c++) out[c] = (int)(sum[c] / n);        // full 12-bit (0..4095); host CAP/ADC_DIV=1
+  for (int c = 0; c < 5; c++) out[c] = (int)((sum[c] / n) / g.adc_div);   // adc_div 4 -> 0..1023, 1 -> 0..4095
 
   CR_CLR();             // clear integrator cap
   delay(CAP_CLEAR_MS);
@@ -355,7 +357,7 @@ void runErasePhase(int set) {
 
 // ───────────────────────────── SERIAL PARSE ───────────────────────────
 bool parseSerial(Params &p) {
-  const int VAR_NUM = 24;
+  const int VAR_NUM = 25;
   String line = Serial.readStringUntil('|');
   line.trim();
   if (line.length() == 0) return false;
@@ -387,7 +389,7 @@ bool parseSerial(Params &p) {
   p.read_delay    = f[13].toInt();
   p.read_interval = f[14].toInt();
   p.read_mode     = f[15]; p.read_mode.toUpperCase();
-  for (int i = 0; i < 8; i++) p.extra[i] = (16 + i < count) ? f[16 + i].toDouble() : 0.0;
+  for (int i = 0; i < 9; i++) p.extra[i] = (16 + i < count) ? f[16 + i].toDouble() : 0.0;
 
   p.avg_count    = (int)p.extra[0]; if (p.avg_count < 1) p.avg_count = 1;
   p.wwl_hold     = (int)p.extra[1] ? 1 : 0;
@@ -395,6 +397,7 @@ bool parseSerial(Params &p) {
   p.phase_gap_ms = (int)p.extra[5];
   p.dep_path     = (int)p.extra[6]; if (p.dep_path < 0 || p.dep_path > 3) p.dep_path = 0;
   p.rwl_assist   = (int)p.extra[7] ? 1 : 0;
+  p.adc_div      = ((int)p.extra[8] == 1) ? 1 : 4;   // default (field absent / 0) = legacy 0..1023
   if (p.read_mode != "N1ALL" && p.read_mode != "N1SEL") p.read_mode = "N1OFF";
   return true;
 }

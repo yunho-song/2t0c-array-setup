@@ -60,7 +60,7 @@ class FeArraySim:
             time.sleep(0.02)
         out = []
         for r in range(5):
-            adc = [int(max(0, min(4095, self.state[r][c] + self.rng.gauss(0, self.noise / max(1, p.avg_count) ** 0.5))))
+            adc = [int(max(0, min(4095, self.state[r][c] * 4 + self.rng.gauss(0, 4 * self.noise / max(1, p.avg_count) ** 0.5))) // max(1, getattr(p, 'adc_div', 4)))
                    for c in range(NUM_CH)]
             out.append(ReadRecord(set_, phase, pulse, r, adc, time.time() - t0))
         return out
