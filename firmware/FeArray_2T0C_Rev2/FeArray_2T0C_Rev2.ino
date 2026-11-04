@@ -56,9 +56,10 @@
  *                                        Requires the host to switch rails between P and D (split voltages):
  *                                        D phase WBL_PROG = 0, WBL_OFF = -V.  Unselected rows stay at 0 V.
  *                               3 = TOPRD (2T0C, low WTR stress): like TOP (N2 LOW, WBL = WBL_OFF = -V between
- *                                        pulses, erase = WWL pulse) but every map read first opens the WTRs
- *                                        (N1ALL/N1SEL) and then raises N2 so the gates are read at WBL_PROG (0 V).
- *                                        Needs read_mode N1ALL or N1SEL and D phase WBL_PROG = 0.
+ *                                        pulses, erase = WWL pulse) but (a) each pulse ends by raising the selected
+ *                                        rows' N2 for zero_t so SN returns to 0 V before the WTR closes, and (b) every
+ *                                        map read first opens the WTRs (N1ALL/N1SEL) and then raises N2 so the gates
+ *                                        are read at WBL_PROG (0 V).  Needs D phase WBL_PROG = 0 (read_mode N1ALL/N1SEL for (b)).
  *  23  extra7        rwl_assist : 1 = during each PROGRAM pulse latch the selected rows' RWL HIGH (= VREAD,
  *                                     negative) so the FeFET sees Vgs = V_SN - VREAD without raising any WTR voltage.
  *                                     Sequence: N1 ON -> pre -> RWL=VREAD -> N2 ON -> pw -> N2 OFF -> RWL=VINP -> zero -> N1 OFF
@@ -211,14 +212,25 @@ void programPulse(uint32_t n1, uint32_t n2, uint32_t wl) {   // wl = selected ro
 
 // Erase: WBL stays at V_off, WWL pulse (FEE mode of Rev1.0)
 //   N2 OFF -> pre -> N1 ON -> pw -> N1 OFF -> post -> zero
-void erasePulse(uint32_t n1) {
+// TOP   (dep_path 0): N2 LOW -> pre -> N1 ON -> pw -> N1 OFF -> post -> zero   (SN left at WBL_OFF = -V; Rev1.0 FEE)
+// TOPRD (dep_path 3): N2 LOW -> pre -> N1 ON -> pw -> N2(sel) HIGH -> zero (SN -> WBL_PROG = 0 V) -> N1 OFF -> N2(sel) LOW -> post
+//                     so every pulse ends with SN = 0 V like program/TOPINV; the D-phase WBL_PROG rail must be 0 V.
+void erasePulse(uint32_t n1, uint32_t n2) {
   PIOC->PIO_CODR = N2_ALL;
   udelay(g.pre_en);
   PIOC->PIO_SODR = n1;
   udelay(g.dep_pw);
-  PIOC->PIO_CODR = n1;
-  udelay(g.post_en);
-  udelay(g.zero_t);
+  if (g.dep_path == 3) {
+    PIOC->PIO_SODR = n2;       // selected rows' WBL -> 0 V rail while the WTR is still open
+    udelay(g.zero_t);
+    PIOC->PIO_CODR = n1;
+    PIOC->PIO_CODR = n2;       // WBL back to -V (WTR closed, SN keeps 0 V)
+    udelay(g.post_en);
+  } else {
+    PIOC->PIO_CODR = n1;
+    udelay(g.post_en);
+    udelay(g.zero_t);
+  }
 }
 
 // Erase, pulsed-WBL variant (dep_path=2, TOPINV): N2 rest = HIGH (WBL = WBL_PROG rail = 0 V in D phase),
@@ -351,7 +363,7 @@ void runErasePhase(int set) {
   for (int k = 0; k < g.dep_num && !checkAbort(); k++) {
     if (g.dep_path == 1)      erasePulseBot(ud, uden);
     else if (g.dep_path == 2) erasePulseInv(n1, n2);
-    else                      erasePulse(n1);
+    else                      erasePulse(n1, n2);
     if (g.read_interval > 0 && ((k + 1) % g.read_interval == 0))
       readMap(set, 'D', k + 1);
   }
@@ -488,7 +500,7 @@ void loop() {
       else if (s == "LOOPD") {
         if (g.dep_path == 1)      erasePulseBot(ud, uden);
         else if (g.dep_path == 2) erasePulseInv(n1, n2);
-        else                      erasePulse(n1);
+        else                      erasePulse(n1, n2);
       }
       else                   readRow(row, adc_row);
       if (g.read_wait_ms > 0) delay(g.read_wait_ms);

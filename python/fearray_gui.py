@@ -663,12 +663,19 @@ class FeArrayGUI:
             axes[1].text(0.0, -0.04, MAP_W, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
         else:
             toprd = self.dep_var.get() == "TOPRD"
-            wl = [W(pre), W(dpw), W(post), W(zero)]
-            labs = [(gap, "N2 OFF"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['post_en']}\n= {post:g}"), (wl[3], f"{L['zero_t']}\n= {zero:g}"), (gap, "")]
-            n2 = [(gap, 0), (wl[0], 0), (wl[1], 0), (wl[2], 0), (wl[3], 0), (gap, 0)]
-            n1 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
-            sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.15), (wl[3], 0.15), (gap, 0.15)]
-            draw(axes[1], (f"ERASE pulse ×1  (dep_path=TOPRD)   N2 LOW between pulses → WBL = WBL_OFF(D);  each read: N1 on → N2 HIGH (WBL = WBL_PROG(D) = 0 V) → read → N2 LOW → N1 off" if toprd else
+            if toprd:   # N2 LOW -> pre -> N1 ON -> pw -> N2 HIGH -> zero (SN -> 0 V) -> N1 OFF, N2 LOW -> post
+                wl = [W(pre), W(dpw), W(zero), W(post)]
+                labs = [(gap, "N2 OFF"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['zero_t']}\n= {zero:g}"), (wl[3], f"{L['post_en']}\n= {post:g}"), (gap, "")]
+                n2 = [(gap, 0), (wl[0], 0), (wl[1], 0), (wl[2], 1), (wl[3], 0), (gap, 0)]
+                n1 = [(gap, 0), (wl[0], 1), (wl[1], 1), (wl[2], 1), (wl[3], 0), (gap, 0)]
+                sn = [(gap, 0.6), (wl[0], 0.05), (wl[1], 0.05), (wl[2], 0.6), (wl[3], 0.6), (gap, 0.6)]
+            else:
+                wl = [W(pre), W(dpw), W(post), W(zero)]
+                labs = [(gap, "N2 OFF"), (wl[0], f"{L['pre_en']}\n= {pre:g}"), (wl[1], f"{L['dep_pw']}\n= {dpw:g}"), (wl[2], f"{L['post_en']}\n= {post:g}"), (wl[3], f"{L['zero_t']}\n= {zero:g}"), (gap, "")]
+                n2 = [(gap, 0), (wl[0], 0), (wl[1], 0), (wl[2], 0), (wl[3], 0), (gap, 0)]
+                n1 = [(gap, 0), (wl[0], 0), (wl[1], 1), (wl[2], 0), (wl[3], 0), (gap, 0)]
+                sn = [(gap, 0.6), (wl[0], 0.6), (wl[1], 0.05), (wl[2], 0.15), (wl[3], 0.15), (gap, 0.15)]
+            draw(axes[1], (f"ERASE pulse ×1  (dep_path=TOPRD)   WBL rests at WBL_OFF(D);  pulse ends N2 HIGH for zero → SN = 0 V before N1 off;  each read: N1 on → N2 HIGH (gate 0 V) → read → N2 LOW → N1 off" if toprd else
                            f"ERASE pulse ×1  (dep_path=TOP)   N2 stays LOW → WBL = WBL_OFF {v['WBL_OFF']:g} V, N1 pulse pulls SN to it"),
                  ["N2", "N1", "SN"], {"N1": n1, "N2": n2, "SN": sn}, labs)
             axes[1].text(0.0, -0.04, MAP_W, transform=axes[1].transAxes, fontsize=7.5, va="top", ha="left", color="#333")
