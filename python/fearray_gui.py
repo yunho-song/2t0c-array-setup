@@ -164,7 +164,7 @@ _EN.update({
     'RWL 펄스 수 ×100 µs': 'RWL pulses ×100 µs',
     'N1ALL/N1SEL: WWL ON 후 안정화': 'N1ALL/N1SEL: settle after WWL ON',
     'Read 전 대기 [ms]': 'Pre-read wait [ms]',
-    'ADC 눈금': 'ADC scale', '1023=기존  4095=12비트 전부': '1023=legacy  4095=full 12-bit', '1023 = 12비트/4 (기존 눈금)   4095 = 12비트 전부 (분해능 4배, 포화점 동일). 저장되는 µA 환산은 자동으로 맞춤': '1023 = 12-bit/4 (legacy)   4095 = full 12-bit (4x resolution, same saturation). Saved uA conversion follows automatically',
+    'ADC 눈금': 'ADC scale', 'phase마다 initial read (P→D 전환 직후에도 맵 1회)': 'initial read per phase (one map right after P->D switch too)', '체크하면 각 phase 시작 전에 펄스 없이 맵을 한 번 더 읽어 phase I, pulse 0 으로 저장 (rail 전환 뒤 기준점)': 'reads one extra map before every phase (no pulses), saved as phase I pulse 0 (reference after the rail switch)', '1023=기존  4095=12비트 전부': '1023=legacy  4095=full 12-bit', '1023 = 12비트/4 (기존 눈금)   4095 = 12비트 전부 (분해능 4배, 포화점 동일). 저장되는 µA 환산은 자동으로 맞춤': '1023 = 12-bit/4 (legacy)   4095 = full 12-bit (4x resolution, same saturation). Saved uA conversion follows automatically',
     'ADC 평균': 'ADC avg',
     'cap 1회 충전, ADC n회 평균': 'one cap charge, n ADC samples',
     'P→D 대기 [ms]': 'P->D gap [ms]',
@@ -390,6 +390,11 @@ class FeArrayGUI:
         cb_adc.grid(row=r, column=1, sticky="w")
         cb_adc.bind("<Enter>", lambda _e: self._status(t("1023 = 12비트/4 (기존 눈금)   4095 = 12비트 전부 (분해능 4배, 포화점 동일). 저장되는 µA 환산은 자동으로 맞춤")))
         ttk.Label(f, text=t("1023=기존  4095=12비트 전부"), foreground="gray").grid(row=r, column=2, columnspan=2, sticky="w", padx=(8, 0))
+        r += 1
+        self.pinit_var = tk.BooleanVar(value=False)
+        cb_pi = ttk.Checkbutton(f, text=t("phase마다 initial read (P→D 전환 직후에도 맵 1회)"), variable=self.pinit_var)
+        cb_pi.grid(row=r, column=0, columnspan=4, sticky="w")
+        cb_pi.bind("<Enter>", lambda _e: self._status(t("체크하면 각 phase 시작 전에 펄스 없이 맵을 한 번 더 읽어 phase I, pulse 0 으로 저장 (rail 전환 뒤 기준점)")))
 
         ttk.Label(f, text=t("저장 폴더")).grid(row=r + 1, column=0, sticky="w")
         self.out_var = tk.StringVar(value=os.path.join(HERE, "data"))
@@ -917,7 +922,7 @@ class FeArrayGUI:
         return ScenarioParams(scenario=self.scen_var.get(), rows=rows, cols=cols,
                               read_mode=self.rmode_var.get(), wwl_hold=int(self.hold_var.get()),
                               dep_path=DEP_PATH.get(self.dep_var.get(), 0), rwl_assist=int(self.rwl_var.get()),
-                              adc_div=1 if self.adc_var.get() == "4095" else 4, **kw)
+                              adc_div=1 if self.adc_var.get() == "4095" else 4, phase_init=int(self.pinit_var.get()), **kw)
 
     # ── run ──
     def _start(self):
@@ -960,6 +965,8 @@ class FeArrayGUI:
         self.canvas.draw_idle()
         ri = max(1, p.read_interval)
         self.n_expected = (1 + p.set_num * (p.pot_num // ri + p.dep_num // ri)) if split else p.expected_reads()
+        if p.phase_init and p.scenario in ("PD", "DP"):
+            self.n_expected += 2 * p.set_num - 1
         self.prog.config(maximum=max(1, self.n_expected), value=0)
 
         self.stop_evt.clear()
@@ -1012,7 +1019,7 @@ class FeArrayGUI:
                         rails(vP if ph == "P" else vD, ph)
                         q = ScenarioParams(**{**asdict(p), "scenario": ph, "set_num": 1})
                         for rec in self.ard.run(q):
-                            if not first and rec.phase == "I":
+                            if not first and rec.phase == "I" and not p.phase_init:
                                 continue
                             rec.set = i
                             self.q.put(("rec", rec))
@@ -1250,7 +1257,7 @@ class FeArrayGUI:
         exps = cfg.get("experiments", [])
         if exps:
             e = exps[0]
-            d.update({k: v for k, v in e.items() if k in self.pvars or k in ("read_mode", "wwl_hold", "dep_path", "rwl_assist", "adc_div")})
+            d.update({k: v for k, v in e.items() if k in self.pvars or k in ("read_mode", "wwl_hold", "dep_path", "rwl_assist", "adc_div", "phase_init")})
             self.name_var.set(e.get("name", "exp"))
             self.scen_var.set(e.get("scenario", "PD"))
             cells = {(r, c) for r in e.get("rows", []) for c in e.get("cols", [])}
@@ -1276,6 +1283,8 @@ class FeArrayGUI:
             self.rwl_var.set(bool(int(d["rwl_assist"])))
         if "adc_div" in d:
             self.adc_var.set("4095" if int(d["adc_div"]) == 1 else "1023")
+        if "phase_init" in d:
+            self.pinit_var.set(bool(int(d["phase_init"])))
         for n, r in (cfg.get("psu", {}).get("rails", {}) or {}).items():
             if n in self.neg_vars and "negative" in r:
                 self.neg_vars[n].set(bool(r["negative"])); self._neg_changed(n)

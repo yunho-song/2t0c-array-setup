@@ -83,6 +83,7 @@ class ScenarioParams:
     rwl_assist: int = 0             # 1 = during PROGRAM pulses latch the selected rows' RWL to VREAD (negative):
                                     #     FeFET Vgs = V_SN - VREAD, no extra WTR stress
     adc_div: int = 4                # ADC output scale: 4 = 0..1023 (default), 1 = full 12-bit 0..4095
+    phase_init: int = 0             # 1 = firmware PD/DP: extra map read (phase I) before every phase, not only at start
 
     def to_command(self) -> str:
         f = [self.scenario, mask(self.rows), mask(self.cols),
@@ -91,7 +92,7 @@ class ScenarioParams:
              self.read_time, self.read_set_time, self.read_delay, self.read_interval,
              self.read_mode.upper(),
              self.avg_count, self.wwl_hold, self.read_wait_ms,
-             self.r_interval_s, self.r_points, self.phase_gap_ms, self.dep_path, self.rwl_assist, self.adc_div]
+             self.r_interval_s, self.r_points, self.phase_gap_ms, self.dep_path, self.rwl_assist, self.adc_div, self.phase_init]
         return ",".join(str(x) for x in f) + "|"
 
     def expected_reads(self) -> int:
@@ -101,7 +102,7 @@ class ScenarioParams:
             n = (self.pot_num if self.scenario == "P" else self.dep_num) // ri
             return 1 + n
         if self.scenario in ("PD", "DP"):
-            return 1 + self.set_num * (self.pot_num // ri + self.dep_num // ri)
+            return 1 + self.set_num * (self.pot_num // ri + self.dep_num // ri) + ((2 * self.set_num - 1) if self.phase_init else 0)
         if self.scenario == "R":
             return max(1, self.r_points)
         if self.scenario in ("DBGR", "INIT"):

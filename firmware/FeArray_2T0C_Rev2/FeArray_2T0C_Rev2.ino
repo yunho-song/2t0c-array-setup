@@ -63,6 +63,7 @@
  *                                     negative) so the FeFET sees Vgs = V_SN - VREAD without raising any WTR voltage.
  *                                     Sequence: N1 ON -> pre -> RWL=VREAD -> N2 ON -> pw -> N2 OFF -> RWL=VINP -> zero -> N1 OFF
  *  24  extra8        adc_div    : ADC output divisor: 4 = 0..1023 (legacy scale, default), 1 = full 12-bit 0..4095
+ *  25  extra9        phase_init : 1 = PD/DP: read the map (phase I, pulse 0) before EVERY phase, not only at the start
  *
  *  Scenarios N2HI / N2LO: no pulses, no read. Set the N2 rest state (all rows) and reply EOD>.
  *  The host uses them with dep_path=2 so that WBL never leaves 0 V while PSU rails are re-programmed:
@@ -135,7 +136,7 @@ struct Params {
   int pre_en, post_en, zero_t;
   int read_time, read_set_time, read_delay, read_interval;
   String read_mode;
-  double extra[9];
+  double extra[10];
   // derived
   int avg_count;
   int wwl_hold;
@@ -144,6 +145,7 @@ struct Params {
   int dep_path;
   int rwl_assist;
   int adc_div;
+  int phase_init;
 };
 Params g;
 int adc_row[5];
@@ -357,7 +359,7 @@ void runErasePhase(int set) {
 
 // ───────────────────────────── SERIAL PARSE ───────────────────────────
 bool parseSerial(Params &p) {
-  const int VAR_NUM = 25;
+  const int VAR_NUM = 26;
   String line = Serial.readStringUntil('|');
   line.trim();
   if (line.length() == 0) return false;
@@ -389,7 +391,7 @@ bool parseSerial(Params &p) {
   p.read_delay    = f[13].toInt();
   p.read_interval = f[14].toInt();
   p.read_mode     = f[15]; p.read_mode.toUpperCase();
-  for (int i = 0; i < 9; i++) p.extra[i] = (16 + i < count) ? f[16 + i].toDouble() : 0.0;
+  for (int i = 0; i < 10; i++) p.extra[i] = (16 + i < count) ? f[16 + i].toDouble() : 0.0;
 
   p.avg_count    = (int)p.extra[0]; if (p.avg_count < 1) p.avg_count = 1;
   p.wwl_hold     = (int)p.extra[1] ? 1 : 0;
@@ -398,6 +400,7 @@ bool parseSerial(Params &p) {
   p.dep_path     = (int)p.extra[6]; if (p.dep_path < 0 || p.dep_path > 3) p.dep_path = 0;
   p.rwl_assist   = (int)p.extra[7] ? 1 : 0;
   p.adc_div      = ((int)p.extra[8] == 1) ? 1 : 4;   // default (field absent / 0) = legacy 0..1023
+  p.phase_init   = (int)p.extra[9] ? 1 : 0;
   if (p.read_mode != "N1ALL" && p.read_mode != "N1SEL") p.read_mode = "N1OFF";
   return true;
 }
@@ -438,10 +441,22 @@ void loop() {
     runErasePhase(1);
   } else if (s == "PD") {
     readMap(0, 'I', 0);
-    for (int i = 1; i <= g.set_num && !g_abort; i++) { runProgramPhase(i); if (g.phase_gap_ms > 0) delay(g.phase_gap_ms); runErasePhase(i); }
+    for (int i = 1; i <= g.set_num && !g_abort; i++) {
+      if (g.phase_init && i > 1) readMap(i, 'I', 0);
+      runProgramPhase(i);
+      if (g.phase_gap_ms > 0) delay(g.phase_gap_ms);
+      if (g.phase_init) readMap(i, 'I', 0);        // state right before the D phase
+      runErasePhase(i);
+    }
   } else if (s == "DP") {
     readMap(0, 'I', 0);
-    for (int i = 1; i <= g.set_num && !g_abort; i++) { runErasePhase(i); if (g.phase_gap_ms > 0) delay(g.phase_gap_ms); runProgramPhase(i); }
+    for (int i = 1; i <= g.set_num && !g_abort; i++) {
+      if (g.phase_init && i > 1) readMap(i, 'I', 0);
+      runErasePhase(i);
+      if (g.phase_gap_ms > 0) delay(g.phase_gap_ms);
+      if (g.phase_init) readMap(i, 'I', 0);
+      runProgramPhase(i);
+    }
   } else if (s == "R") {                       // repeated map read (retention / drift)
     int n = (int)g.extra[4]; if (n < 1) n = 1;
     long interval_ms = (long)(g.extra[3] * 1000.0);

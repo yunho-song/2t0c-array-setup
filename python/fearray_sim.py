@@ -92,14 +92,13 @@ class FeArraySim:
             yield from phase_P(1)
         elif s == "D":
             yield from phase_D(1)
-        elif s == "PD":
+        elif s in ("PD", "DP"):
+            pi = getattr(p, "phase_init", 0)
             for i in range(1, p.set_num + 1):
-                yield from phase_P(i)
-                yield from phase_D(i)
-        elif s == "DP":
-            for i in range(1, p.set_num + 1):
-                yield from phase_D(i)
-                yield from phase_P(i)
+                if pi and i > 1: yield from self._read(p, i, "I", 0, t0)
+                yield from (phase_P(i) if s == "PD" else phase_D(i))
+                if pi: yield from self._read(p, i, "I", 0, t0)
+                yield from (phase_D(i) if s == "PD" else phase_P(i))
         elif s in ("R", "DBGR"):
             for i in range(max(1, p.r_points) if s == "R" else 1):
                 if i and p.r_interval_s and not self.fast:
