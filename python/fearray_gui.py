@@ -42,7 +42,7 @@ sys.path.insert(0, HERE)
 
 from fearray_arduino import FeArrayArduino, ScenarioParams, ReadRecord, NUM_CH, CAP_F   # noqa: E402
 from fearray_measure import ExperimentWriter                                       # noqa: E402
-from psu_macro_2T0C import DEFAULT_RAILS, DEFAULT_ON_ORDER                          # noqa: E402
+from psu_macro_2T0C import DEFAULT_RAILS, DEFAULT_ON_ORDER, RAIL_PRESETS            # noqa: E402
 
 
 # ───────────────────────── UI language / fonts ─────────────────────────
@@ -164,7 +164,7 @@ _EN.update({
     'RWL 펄스 수 ×100 µs': 'RWL pulses ×100 µs',
     'N1ALL/N1SEL: WWL ON 후 안정화': 'N1ALL/N1SEL: settle after WWL ON',
     'Read 전 대기 [ms]': 'Pre-read wait [ms]',
-    'ADC 눈금': 'ADC scale', 'phase마다 initial read (P→D 전환 직후에도 맵 1회)': 'initial read per phase (one map right after P->D switch too)', '체크하면 각 phase 시작 전에 펄스 없이 맵을 한 번 더 읽어 phase I, pulse 0 으로 저장 (rail 전환 뒤 기준점)': 'reads one extra map before every phase (no pulses), saved as phase I pulse 0 (reference after the rail switch)', '1023=기존  4095=12비트 전부': '1023=legacy  4095=full 12-bit', '1023 = 12비트/4 (기존 눈금)   4095 = 12비트 전부 (분해능 4배, 포화점 동일). 저장되는 µA 환산은 자동으로 맞춤': '1023 = 12-bit/4 (legacy)   4095 = full 12-bit (4x resolution, same saturation). Saved uA conversion follows automatically',
+    'ADC 눈금': 'ADC scale', 'rail 맵': 'rail map', '어느 PSU 몇 번 채널에 어떤 rail을 꽂았는지 (배선 프리셋). 연결 전에 고르고, 극성 체크도 프리셋에 맞춰 바뀜': 'which rail is wired to which PSU/channel (preset). Pick before connecting; polarity boxes follow the preset', 'rail 맵은 연결 해제 후 다시 연결해야 적용됩니다': 'rail map takes effect after disconnect/reconnect', 'phase마다 initial read (P→D 전환 직후에도 맵 1회)': 'initial read per phase (one map right after P->D switch too)', '체크하면 각 phase 시작 전에 펄스 없이 맵을 한 번 더 읽어 phase I, pulse 0 으로 저장 (rail 전환 뒤 기준점)': 'reads one extra map before every phase (no pulses), saved as phase I pulse 0 (reference after the rail switch)', '1023=기존  4095=12비트 전부': '1023=legacy  4095=full 12-bit', '1023 = 12비트/4 (기존 눈금)   4095 = 12비트 전부 (분해능 4배, 포화점 동일). 저장되는 µA 환산은 자동으로 맞춤': '1023 = 12-bit/4 (legacy)   4095 = full 12-bit (4x resolution, same saturation). Saved uA conversion follows automatically',
     'ADC 평균': 'ADC avg',
     'cap 1회 충전, ADC n회 평균': 'one cap charge, n ADC samples',
     'P→D 대기 [ms]': 'P->D gap [ms]',
@@ -337,6 +337,14 @@ class FeArrayGUI:
         self.use_psu_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text=t("PSU 제어 사용 (해제 시 전압은 수동)"), variable=self.use_psu_var).grid(
             row=5, column=0, columnspan=3, sticky="w")
+        ttk.Label(f, text=t("rail 맵")).grid(row=8, column=0, sticky="w")
+        self.railmap_var = tk.StringVar(value=list(RAIL_PRESETS)[0])
+        cb_rm = ttk.Combobox(f, textvariable=self.railmap_var, values=list(RAIL_PRESETS), width=22, state="readonly")
+        cb_rm.grid(row=8, column=1, sticky="w", padx=3)
+        cb_rm.bind("<<ComboboxSelected>>", lambda _e: self._railmap_changed())
+        cb_rm.bind("<Enter>", lambda _e: self._status(t("어느 PSU 몇 번 채널에 어떤 rail을 꽂았는지 (배선 프리셋). 연결 전에 고르고, 극성 체크도 프리셋에 맞춰 바뀜")))
+        self.railmap_lbl = ttk.Label(f, text="", foreground="gray", wraplength=330, justify="left")
+        self.railmap_lbl.grid(row=9, column=0, columnspan=3, sticky="w")
 
         self.conn_btn = ttk.Button(f, text=t("연결"), command=self._toggle_connect)
         self.conn_btn.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(4, 0))
@@ -462,7 +470,7 @@ class FeArrayGUI:
             self.neg_vars[rail] = nv
             cbn = ttk.Checkbutton(f, variable=nv, command=lambda r=rail: self._neg_changed(r))
             cbn.grid(row=2 + i, column=4, padx=(6, 0))
-            cbn.bind("<Enter>", lambda _e, r=rail: self._status(t("반전 배선 = PSU 채널 '+'를 GND에, '−'를 rail에 (음수 전용). 체크 해제 = 정배선 (양수 전용). 실제 배선과 맞출 것: {r}").format(r=f"{r} → PSU{DEFAULT_RAILS[r]['psu']} CH{DEFAULT_RAILS[r]['ch']}")))
+            cbn.bind("<Enter>", lambda _e, r=rail: self._status(t("반전 배선 = PSU 채널 '+'를 GND에, '−'를 rail에 (음수 전용). 체크 해제 = 정배선 (양수 전용). 실제 배선과 맞출 것: {r}").format(r=f"{r} → PSU{self._base_rails()[r]['psu']} CH{self._base_rails()[r]['ch']}")))
             for j, ph in enumerate(("base", "P", "D")):
                 v = tk.StringVar(value=str(DEFAULT_V[rail]) if ph == "base" else "")
                 self.vvars[ph][rail] = v
@@ -824,15 +832,28 @@ class FeArrayGUI:
             out[rail] = float(s)
         return out
 
+    def _base_rails(self):
+        return RAIL_PRESETS.get(self.railmap_var.get(), DEFAULT_RAILS)
+
     def _rails_cfg(self):
-        """DEFAULT_RAILS with the polarity checkboxes applied (wiring can be swapped per experiment)."""
+        """Selected rail-map preset with the polarity checkboxes applied (wiring can be swapped per experiment)."""
         return {n: dict(r, negative=bool(self.neg_vars[n].get())) if n in self.neg_vars else dict(r)
-                for n, r in DEFAULT_RAILS.items()}
+                for n, r in self._base_rails().items()}
+
+    def _railmap_changed(self):
+        base = self._base_rails()
+        for n, r in base.items():
+            if n in self.neg_vars:
+                self.neg_vars[n].set(bool(r["negative"]))
+        self.railmap_lbl.config(text=", ".join(f"{n}→PSU{r['psu']}CH{r['ch']}{'(−)' if r['negative'] else ''}" for n, r in base.items()))
+        if self.psu is not None:
+            self._logln(t("rail 맵은 연결 해제 후 다시 연결해야 적용됩니다"))
 
     def _neg_changed(self, rail):
+        base = self._base_rails()
         if self.psu is not None and rail in self.psu.rails:
             self.psu.rails[rail]["negative"] = bool(self.neg_vars[rail].get())
-            self._logln(f"{rail}: {'negative (반전 배선)' if self.neg_vars[rail].get() else 'positive (정배선)'} — PSU{DEFAULT_RAILS[rail]['psu']} CH{DEFAULT_RAILS[rail]['ch']} 배선을 실제로 바꿨는지 확인")
+            self._logln(f"{rail}: {'negative (반전 배선)' if self.neg_vars[rail].get() else 'positive (정배선)'} — PSU{base[rail]['psu']} CH{base[rail]['ch']} 배선을 실제로 바꿨는지 확인")
 
     def _psu_cfg(self):
         # model per PSU is auto-detected from *IDN? (EDU36311A / 2230G); the rail map is the same for both
@@ -1292,7 +1313,11 @@ class FeArrayGUI:
             self.adc_var.set("4095" if int(d["adc_div"]) == 1 else "1023")
         if "phase_init" in d:
             self.pinit_var.set(bool(int(d["phase_init"])))
-        for n, r in (cfg.get("psu", {}).get("rails", {}) or {}).items():
+        yrails = cfg.get("psu", {}).get("rails", {}) or {}
+        for name, preset in RAIL_PRESETS.items():
+            if yrails and all(n in yrails and int(yrails[n].get("psu", -1)) == r["psu"] and int(yrails[n].get("ch", -1)) == r["ch"] for n, r in preset.items()):
+                self.railmap_var.set(name); self._railmap_changed(); break
+        for n, r in yrails.items():
             if n in self.neg_vars and "negative" in r:
                 self.neg_vars[n].set(bool(r["negative"])); self._neg_changed(n)
         self._logln(t("YAML 불러옴: {fn}").format(fn=fn))

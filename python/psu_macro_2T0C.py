@@ -81,6 +81,21 @@ DEFAULT_RAILS = {
     "VSS":      {"psu": 3, "ch": 2, "negative": True,  "current_limit": 0.5},   # board -supply
     "WWL_ON":   {"psu": 3, "ch": 3, "negative": False, "current_limit": 0.05},  # N1 on
 }
+# Alternative bench maps (GUI 'rail 맵' dropdown / yaml psu.rails). Rails that share a supply share its
+# ground return, so putting both WBL rails on one instrument keeps the P-phase 0 V (WBL_OFF) and the
+# D-phase 0 V (WBL_PROG, TOPINV/TOPRD) referenced to the same return lead.
+RAIL_PRESETS = {
+    "EDU bench (default)": DEFAULT_RAILS,
+    "WBL on one PSU": {
+        "WBL_PROG": {"psu": 1, "ch": 1, "negative": False, "current_limit": 0.05},  # PSU1 CH1 (+)
+        "WBL_OFF":  {"psu": 1, "ch": 2, "negative": True,  "current_limit": 0.05},  # PSU1 CH2 (-, inverted)
+        "VREAD":    {"psu": 1, "ch": 3, "negative": True,  "current_limit": 0.05},  # PSU1 CH3 (-)
+        "WWL_ON":   {"psu": 2, "ch": 1, "negative": False, "current_limit": 0.05},  # PSU2 CH1 (+)
+        "WWL_OFF":  {"psu": 2, "ch": 3, "negative": True,  "current_limit": 0.05},  # PSU2 CH3 (-)
+        "VDD":      {"psu": 3, "ch": 1, "negative": False, "current_limit": 0.5},   # PSU3 CH1 (+)
+        "VSS":      {"psu": 3, "ch": 2, "negative": True,  "current_limit": 0.5},   # PSU3 CH2 (-)
+    },
+}
 # Optional bottom-path rails (4T0C cells only; dep_path=1). Add to yaml psu.rails if used:
 #   WBL_DEP:   {psu: 2, ch: 2, negative: true}   BLBTM_OFF: {psu: 1, ch: 2, negative: false}
 DEFAULT_ON_ORDER = ["VDD", "VSS", "WWL_OFF", "WBL_OFF", "BLBTM_OFF", "VREAD", "WWL_ON", "WBL_PROG", "WBL_DEP"]  # rails absent from cfg are skipped
